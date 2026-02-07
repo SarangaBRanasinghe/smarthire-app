@@ -128,6 +128,10 @@
   --sidebar-ring: oklch(0.75 0.18 162.48);
 }
 
+.button{
+  cursor: pointer;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
