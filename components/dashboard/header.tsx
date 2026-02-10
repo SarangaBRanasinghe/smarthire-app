@@ -1,9 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import { useUserStore, useAppStore } from '@/lib/stores'
+import { useAuth } from '@/lib/hooks/use-auth'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import {
@@ -36,18 +35,11 @@ interface DashboardHeaderProps {
 }
 
 export function DashboardHeader({ pathname, mobileOpen, setMobileOpen }: DashboardHeaderProps) {
-  const router = useRouter()
-  const { profile, clearUser } = useUserStore()
+  const { profile } = useUserStore()
   const { toggleSidebar } = useAppStore()
-  const supabase = createClient()
+  const { signOut } = useAuth()
 
   if (!profile) return null
-
-  const handleSignOut = async () => {
-    await supabase.auth.signOut()
-    clearUser()
-    router.push('/login')
-  }
 
   return (
     <header className="flex h-16 shrink-0 items-center justify-between border-b bg-white px-4 lg:px-6">
@@ -122,7 +114,7 @@ export function DashboardHeader({ pathname, mobileOpen, setMobileOpen }: Dashboa
             </Link>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={handleSignOut} className="text-red-600">
+          <DropdownMenuItem onClick={signOut} className="text-red-600">
             <LogOut className="mr-2 h-4 w-4" />
             Sign out
           </DropdownMenuItem>

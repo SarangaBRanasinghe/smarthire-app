@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist, createJSONStorage } from 'zustand/middleware'
 import type { Profile, SeekerProfile, RecruiterProfile, UserRole } from '@/types/database'
 
 interface UserState {
@@ -14,23 +15,36 @@ interface UserState {
   role: () => UserRole | null
 }
 
-export const useUserStore = create<UserState>((set, get) => ({
-  profile: null,
-  seekerProfile: null,
-  recruiterProfile: null,
-  isLoading: true,
-  setProfile: (profile) => set({ profile }),
-  setSeekerProfile: (seekerProfile) => set({ seekerProfile }),
-  setRecruiterProfile: (recruiterProfile) => set({ recruiterProfile }),
-  setIsLoading: (isLoading) => set({ isLoading }),
-  clearUser: () => set({
-    profile: null,
-    seekerProfile: null,
-    recruiterProfile: null,
-    isLoading: false,
-  }),
-  role: () => get().profile?.role ?? null,
-}))
+export const useUserStore = create<UserState>()(
+  persist(
+    (set, get) => ({
+      profile: null,
+      seekerProfile: null,
+      recruiterProfile: null,
+      isLoading: false,
+      setProfile: (profile) => set({ profile }),
+      setSeekerProfile: (seekerProfile) => set({ seekerProfile }),
+      setRecruiterProfile: (recruiterProfile) => set({ recruiterProfile }),
+      setIsLoading: (isLoading) => set({ isLoading }),
+      clearUser: () => set({
+        profile: null,
+        seekerProfile: null,
+        recruiterProfile: null,
+        isLoading: false,
+      }),
+      role: () => get().profile?.role ?? null,
+    }),
+    {
+      name: 'user-storage',
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({
+        profile: state.profile,
+        seekerProfile: state.seekerProfile,
+        recruiterProfile: state.recruiterProfile,
+      }),
+    }
+  )
+)
 
 interface AppState {
   sidebarOpen: boolean
