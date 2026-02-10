@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { createClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -34,71 +35,20 @@ import {
   MapPin,
   DollarSign,
 } from 'lucide-react'
-import type { JobStatus } from '@/types/database'
+import type { JobStatus, Database } from '@/types/database'
 
-// Mock data for jobs
-const mockJobs = [
-  {
-    id: '1',
-    title: 'Senior Frontend Developer',
-    location: 'Colombo, Sri Lanka',
-    type: 'full_time',
-    status: 'active' as JobStatus,
-    applicants: 45,
-    createdAt: '2024-01-15',
-    salary_min: 150000,
-    salary_max: 250000,
-    currency: 'LKR',
-  },
-  {
-    id: '2',
-    title: 'Full Stack Engineer',
-    location: 'Remote',
-    type: 'remote',
-    status: 'active' as JobStatus,
-    applicants: 32,
-    createdAt: '2024-01-12',
-    salary_min: 200000,
-    salary_max: 350000,
-    currency: 'LKR',
-  },
-  {
-    id: '3',
-    title: 'DevOps Engineer',
-    location: 'Hybrid',
-    type: 'full_time',
-    status: 'active' as JobStatus,
-    applicants: 28,
-    createdAt: '2024-01-10',
-    salary_min: 220000,
-    salary_max: 400000,
-    currency: 'LKR',
-  },
-  {
-    id: '4',
-    title: 'React Developer',
-    location: 'Kandy, Sri Lanka',
-    type: 'full_time',
-    status: 'draft' as JobStatus,
-    applicants: 0,
-    createdAt: '2024-01-18',
-    salary_min: 100000,
-    salary_max: 180000,
-    currency: 'LKR',
-  },
-  {
-    id: '5',
-    title: 'Backend Developer',
-    location: 'Colombo, Sri Lanka',
-    type: 'contract',
-    status: 'closed' as JobStatus,
-    applicants: 56,
-    createdAt: '2023-12-15',
-    salary_min: 180000,
-    salary_max: 280000,
-    currency: 'LKR',
-  },
-]
+type Job = {
+  id: string
+  title: string
+  location: string | null
+  type: string
+  status: JobStatus
+  applicants: number
+  created_at: string
+  salary_min: number | null
+  salary_max: number | null
+  currency: string | null
+}
 
 const statusConfig: Record<JobStatus, { label: string; color: string }> = {
   draft: { label: 'Draft', color: 'bg-gray-100 text-gray-700' },
@@ -114,7 +64,9 @@ const jobTypes: Record<string, string> = {
   internship: 'Internship',
 }
 
-function formatSalary(min: number, max: number, currency: string) {
+function formatSalary(min: number | null, max: number | null, currency: string | null) {
+  if (!min || !max || !currency) return 'Not specified'
+  
   const formatter = new Intl.NumberFormat('en-LK', {
     style: 'currency',
     currency,
@@ -133,24 +85,125 @@ function formatDate(dateString: string) {
 }
 
 export default function RecruiterJobsPage() {
+  const supabase = createClient()
   const [searchQuery, setSearchQuery] = useState('')
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [selectedJob, setSelectedJob] = useState<typeof mockJobs[0] | null>(null)
+  const [selectedJob, setSelectedJob] = useState<Job | null>(null)
+  const [jobs, setJobs] = useState<Job[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+
+  // Fetch jobs from Supabase
+  useEffect(() => {
+    async function fetchJobs() {
+      try {
+        // Get current user
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+          toast.error('Please login to view jobs')
+          return
+        }
+
+        // Fetch jobs for this recruiter
+        const { data: jobsData, error: jobsError } = await supabase
+          .from('jobs')
+          .select('*')
+          .eq('recruiter_id', user.id)
+          .order('created_at', { ascending: false })
+          .returns<Database['public']['Tables']['jobs']['Row'][]>()
+
+        if (jobsError) {
+          console.error('Error fetching jobs:', jobsError)
+          toast.error('Failed to fetch jobs')
+          return
+        }
+
+        if (!jobsData) {
+          setJobs([])
+          return
+        }
+
+        // Fetch application counts for each job
+        const jobsWithApplicants: Job[] = await Promise.all(
+          jobsData.map(async (job): Promise<Job> => {
+            const { count } = await supabase
+              .from('applications')
+              .select('*', { count: 'exact', head: true })
+              .eq('job_id', job.id)
+
+            return {
+              id: job.id,
+              title: job.title,
+              location: job.location,
+              type: job.type,
+              status: job.status,
+              applicants: count || 0,
+              created_at: job.created_at,
+              salary_min: job.salary_min,
+              salary_max: job.salary_max,
+              currency: job.currency,
+            }
+          })
+        )
+
+        setJobs(jobsWithApplicants)
+      } catch (error) {
+        console.error('Error:', error)
+        toast.error('An error occurred while fetching jobs')
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    fetchJobs()
+  }, [supabase])
 
   const stats = {
-    active: mockJobs.filter((j) => j.status === 'active').length,
-    draft: mockJobs.filter((j) => j.status === 'draft').length,
-    totalApplicants: mockJobs.reduce((sum, j) => sum + j.applicants, 0),
+    active: jobs.filter((j) => j.status === 'active').length,
+    draft: jobs.filter((j) => j.status === 'draft').length,
+    totalApplicants: jobs.reduce((sum, j) => sum + j.applicants, 0),
   }
 
-  const filteredJobs = mockJobs.filter((job) =>
+  const filteredJobs = jobs.filter((job) =>
     job.title.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
-  const handleDelete = () => {
-    toast.success(`Job "${selectedJob?.title}" deleted successfully`)
-    setDeleteDialogOpen(false)
-    setSelectedJob(null)
+  const handleDelete = async () => {
+    if (!selectedJob) return
+
+    try {
+      const { error } = await supabase
+        .from('jobs')
+        .delete()
+        .eq('id', selectedJob.id)
+
+      if (error) {
+        console.error('Error deleting job:', error)
+        toast.error('Failed to delete job')
+        return
+      }
+
+      toast.success(`Job "${selectedJob.title}" deleted successfully`)
+      // Remove from local state
+      setJobs(jobs.filter(j => j.id !== selectedJob.id))
+      setDeleteDialogOpen(false)
+      setSelectedJob(null)
+    } catch (error) {
+      console.error('Error:', error)
+      toast.error('An error occurred while deleting the job')
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-center py-12">
+          <div className="text-center">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-emerald-600 border-t-transparent"></div>
+            <p className="mt-4 text-sm text-gray-500">Loading jobs...</p>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -263,7 +316,7 @@ export default function RecruiterJobsPage() {
                     </span>
                     <span className="flex items-center gap-1">
                       <Clock className="h-4 w-4" />
-                      Posted {formatDate(job.createdAt)}
+                      Posted {formatDate(job.created_at)}
                     </span>
                   </div>
                 </div>
