@@ -31,7 +31,7 @@ export default function AuthLayout({
                 Find Your Dream Job with AI
               </h2>
               <p className="mt-4 text-lg text-emerald-100">
-                Join thousands of professionals who have transformed their careers using SmartHire's AI-powered matching technology.
+                Join thousands of professionals who have transformed their careers using SmartHires AI-powered matching technology.
               </p>
               <div className="mt-8 flex justify-center gap-8">
                 <div className="text-center">
