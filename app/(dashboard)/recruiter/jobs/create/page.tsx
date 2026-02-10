@@ -1,10 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import { createClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -57,10 +58,12 @@ const suggestedSkills = [
 
 export default function CreateJobPage() {
   const router = useRouter()
+  const supabase = createClient()
   const [isLoading, setIsLoading] = useState(false)
   const [skills, setSkills] = useState<string[]>([])
   const [newSkill, setNewSkill] = useState('')
   const [status, setStatus] = useState<'draft' | 'active'>('draft')
+  const [recruiterId, setRecruiterId] = useState<string | null>(null)
 
   const {
     register,
@@ -75,6 +78,32 @@ export default function CreateJobPage() {
       currency: 'LKR',
     },
   })
+
+  // Get current user/recruiter
+  useEffect(() => {
+    async function getUser() {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        // Check if user has recruiter profile
+        const { data: recruiterProfile } = await supabase
+          .from('recruiter_profiles')
+          .select('id')
+          .eq('id', user.id)
+          .single()
+        
+        if (recruiterProfile) {
+          setRecruiterId(recruiterProfile.id)
+        } else {
+          toast.error('Recruiter profile not found')
+          router.push('/recruiter/jobs')
+        }
+      } else {
+        toast.error('Please login to create jobs')
+        router.push('/login')
+      }
+    }
+    getUser()
+  }, [supabase, router])
 
   const selectedType = watch('type')
 
@@ -96,10 +125,70 @@ export default function CreateJobPage() {
   }
 
   const onSubmit = async (data: JobFormData) => {
+    if (!recruiterId) {
+      toast.error('Recruiter profile not found')
+      return
+    }
+
     setIsLoading(true)
     try {
-      // TODO: Submit to Supabase
-      console.log('Creating job:', { ...data, skills, status })
+      // Insert the job
+      const { data: newJob, error: jobError } = await supabase
+        .from('jobs')
+        .insert({
+          recruiter_id: recruiterId,
+          title: data.title,
+          description: data.description,
+          location: data.location,
+          type: data.type,
+          salary_min: data.salary_min ? parseFloat(data.salary_min) : null,
+          salary_max: data.salary_max ? parseFloat(data.salary_max) : null,
+          currency: data.currency || 'LKR',
+          status: status,
+        })
+        .select()
+        .single()
+
+      if (jobError) {
+        console.error('Job creation error:', jobError)
+        throw new Error(jobError.message)
+      }
+
+      // Handle skills if any
+      if (skills.length > 0 && newJob) {
+        // First, insert skills that don't exist
+        for (const skillName of skills) {
+          const { error: skillError } = await supabase
+            .from('skills')
+            .upsert({ name: skillName }, { onConflict: 'name', ignoreDuplicates: true })
+          
+          if (skillError) {
+            console.error('Skill insert error:', skillError)
+          }
+        }
+
+        // Get skill IDs
+        const { data: skillRecords } = await supabase
+          .from('skills')
+          .select('id, name')
+          .in('name', skills)
+
+        if (skillRecords) {
+          // Create job_skills relationships
+          const jobSkills = skillRecords.map(skill => ({
+            job_id: newJob.id,
+            skill_id: skill.id,
+          }))
+
+          const { error: jobSkillsError } = await supabase
+            .from('job_skills')
+            .insert(jobSkills)
+
+          if (jobSkillsError) {
+            console.error('Job skills error:', jobSkillsError)
+          }
+        }
+      }
 
       if (status === 'active') {
         toast.success('Job posted successfully!')
@@ -108,8 +197,9 @@ export default function CreateJobPage() {
       }
 
       router.push('/recruiter/jobs')
-    } catch {
-      toast.error('Failed to create job')
+    } catch (error) {
+      console.error('Error creating job:', error)
+      toast.error('Failed to create job. Please try again.')
     } finally {
       setIsLoading(false)
     }
