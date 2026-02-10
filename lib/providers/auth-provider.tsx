@@ -91,9 +91,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           await fetchUserData(currentSession.user.id)
         } else if (event === 'SIGNED_OUT') {
           clearUser()
-        } else if (event === 'TOKEN_REFRESHED' && currentSession?.user) {
-          // Token was refreshed, update user data if needed
-          console.log('Token refreshed')
         } else if (event === 'USER_UPDATED' && currentSession?.user) {
           await fetchUserData(currentSession.user.id)
         }
