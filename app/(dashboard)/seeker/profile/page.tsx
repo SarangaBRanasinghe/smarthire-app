@@ -88,14 +88,20 @@ export default function SeekerProfilePage() {
           .from('profiles')
           .select('full_name, email')
           .eq('id', user.id)
-          .single()
+          .single<{ full_name: string | null; email: string }>()
 
         // Fetch seeker_profile (bio, phone, location, experience_summary, education_summary)
         const { data: seekerProfile } = await supabase
           .from('seeker_profiles')
           .select('bio, phone, location, experience_summary, education_summary')
           .eq('id', user.id)
-          .single()
+          .single<{
+            bio: string | null
+            phone: string | null
+            location: string | null
+            experience_summary: string | object | null
+            education_summary: string | object | null
+          }>()
 
         // Fetch seeker skills
         const { data: seekerSkills } = await supabase
@@ -207,6 +213,7 @@ export default function SeekerProfilePage() {
       // 1. Update profiles table (full_name)
       const { error: profileError } = await supabase
         .from('profiles')
+        // @ts-expect-error - Supabase type inference issue
         .update({ full_name: data.fullName })
         .eq('id', userId)
 
@@ -218,6 +225,7 @@ export default function SeekerProfilePage() {
       // 2. Upsert seeker_profiles table
       const { error: seekerError } = await supabase
         .from('seeker_profiles')
+        // @ts-expect-error - Supabase type inference issue
         .upsert({
           id: userId,
           bio: data.bio || null,
@@ -238,6 +246,7 @@ export default function SeekerProfilePage() {
         for (const skillName of skills) {
           const { error: skillError } = await supabase
             .from('skills')
+            // @ts-expect-error - Supabase type inference issue
             .upsert({ name: skillName }, { onConflict: 'name', ignoreDuplicates: true })
 
           if (skillError) {
@@ -259,13 +268,14 @@ export default function SeekerProfilePage() {
             .eq('seeker_id', userId)
 
           // Insert new seeker_skills relationships
-          const seekerSkills = skillRecords.map((skill) => ({
+          const seekerSkills = skillRecords.map((skill: { id: string; name: string }) => ({
             seeker_id: userId,
             skill_id: skill.id,
           }))
 
           const { error: seekerSkillsError } = await supabase
             .from('seeker_skills')
+            // @ts-expect-error - Supabase type inference issue
             .insert(seekerSkills)
 
           if (seekerSkillsError) {
@@ -291,7 +301,7 @@ export default function SeekerProfilePage() {
 
   if (isLoadingProfile) {
     return (
-      <div className="flex min-h-[400px] items-center justify-center">
+      <div className="flex min-h-100 items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="h-8 w-8 animate-spin text-emerald-600" />
           <p className="text-sm text-gray-500">Loading your profile...</p>
@@ -303,7 +313,7 @@ export default function SeekerProfilePage() {
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       {/* AI CV Parsing Card */}
-      <Card className="border-emerald-200 bg-gradient-to-r from-emerald-50 to-emerald-100/50">
+      <Card className="border-emerald-200 bg-linear-to-r from-emerald-50 to-emerald-100/50">
         <CardHeader>
           <div className="flex items-center gap-2">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-600">

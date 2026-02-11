@@ -33,7 +33,7 @@ import {
   Video,
   Building2,
 } from 'lucide-react'
-import type { ApplicationStatus, JobStatus, JobType, Database } from '@/types/database'
+import type { ApplicationStatus, JobStatus, JobType } from '@/types/database'
 
 type Job = {
   id: string
@@ -140,8 +140,8 @@ export default function JobDetailsPage() {
 
         if (!skillsError && jobSkills) {
           const skillNames = jobSkills
-            .map((js: any) => js.skills?.name)
-            .filter(Boolean)
+            .map((js: { skills: { name: string } | null }) => js.skills?.name)
+            .filter((name): name is string => Boolean(name))
           setSkills(skillNames)
         }
 
@@ -165,7 +165,19 @@ export default function JobDetailsPage() {
           .order('ai_match_score', { ascending: false })
 
         if (!applicationsError && applicationsData) {
-          const formattedApplicants: Applicant[] = applicationsData.map((app: any) => ({
+          const formattedApplicants: Applicant[] = applicationsData.map((app: {
+            id: string
+            status: string
+            ai_match_score: number | null
+            applied_at: string
+            seeker_profiles?: {
+              id: string
+              profiles?: {
+                email: string
+                full_name: string | null
+              }
+            }
+          }) => ({
             id: app.id,
             name: app.seeker_profiles?.profiles?.full_name || 'Unknown',
             email: app.seeker_profiles?.profiles?.email || '',
@@ -190,10 +202,6 @@ export default function JobDetailsPage() {
     toast.success(`Interview scheduled with ${selectedApplicant?.name}`)
     setIsScheduleDialogOpen(false)
     setSelectedApplicant(null)
-  }
-
-  const handleUpdateStatus = (applicantId: string, newStatus: ApplicationStatus) => {
-    toast.success(`Status updated to ${statusConfig[newStatus].label}`)
   }
 
   if (isLoading) {
@@ -348,7 +356,7 @@ export default function JobDetailsPage() {
                       </Avatar>
                       <div>
                         <h4 className="font-semibold text-gray-900">{applicant.name}</h4>
-                        <p className="text-sm text-gray-500">{applicant.location}</p>
+                        <p className="text-sm text-gray-500">{applicant.email}</p>
                       </div>
                       <Badge className={statusConfig[applicant.status].color}>
                         {statusConfig[applicant.status].label}
@@ -449,7 +457,6 @@ export default function JobDetailsPage() {
                 <div>
                   <h3 className="text-lg font-semibold">{selectedApplicant.name}</h3>
                   <p className="text-sm text-gray-500">{selectedApplicant.email}</p>
-                  <p className="text-sm text-gray-500">{selectedApplicant.phone}</p>
                 </div>
               </div>
 

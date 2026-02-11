@@ -84,7 +84,7 @@ export default function SeekerOverviewPage() {
             </Button>
           </Link>
           <Link href="/seeker/profile">
-            <Button variant="outline" className="border-white text-white hover:bg-emerald-500">
+            <Button variant="outline" className="border-white text-emerald-700 hover:bg-emerald-500">
               Update Profile
             </Button>
           </Link>
