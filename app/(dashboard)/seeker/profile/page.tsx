@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import { createClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -41,29 +42,100 @@ const profileSchema = z.object({
 type ProfileFormData = z.infer<typeof profileSchema>
 
 export default function SeekerProfilePage() {
+  const supabase = createClient()
   const [isParsingCV, setIsParsingCV] = useState(false)
-  const [skills, setSkills] = useState<string[]>(['JavaScript', 'React', 'TypeScript'])
+  const [isLoadingProfile, setIsLoadingProfile] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
+  const [skills, setSkills] = useState<string[]>([])
   const [newSkill, setNewSkill] = useState('')
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
+  const [userId, setUserId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const {
     register,
     handleSubmit,
     setValue,
-    formState: { errors, isDirty },
+    reset,
+    formState: { errors },
   } = useForm<ProfileFormData>({
     resolver: zodResolver(profileSchema),
     defaultValues: {
-      fullName: 'John Doe',
-      email: 'john.doe@email.com',
-      phone: '+94 77 123 4567',
-      location: 'Colombo, Sri Lanka',
-      bio: 'Experienced software engineer passionate about building great products.',
+      fullName: '',
+      email: '',
+      phone: '',
+      location: '',
+      bio: '',
       experience: '',
       education: '',
     },
   })
+
+  // Load existing profile data on mount
+  useEffect(() => {
+    async function loadProfile() {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+          toast.error('Please login to view your profile')
+          return
+        }
+
+        setUserId(user.id)
+
+        // Fetch profile (full_name, email)
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('full_name, email')
+          .eq('id', user.id)
+          .single()
+
+        // Fetch seeker_profile (bio, phone, location, experience_summary, education_summary)
+        const { data: seekerProfile } = await supabase
+          .from('seeker_profiles')
+          .select('bio, phone, location, experience_summary, education_summary')
+          .eq('id', user.id)
+          .single()
+
+        // Fetch seeker skills
+        const { data: seekerSkills } = await supabase
+          .from('seeker_skills')
+          .select('skills(name)')
+          .eq('seeker_id', user.id)
+
+        // Populate form
+        reset({
+          fullName: profile?.full_name || '',
+          email: profile?.email || user.email || '',
+          phone: seekerProfile?.phone || '',
+          location: seekerProfile?.location || '',
+          bio: seekerProfile?.bio || '',
+          experience: typeof seekerProfile?.experience_summary === 'string'
+            ? seekerProfile.experience_summary
+            : '',
+          education: typeof seekerProfile?.education_summary === 'string'
+            ? seekerProfile.education_summary
+            : '',
+        })
+
+        // Populate skills
+        if (seekerSkills && seekerSkills.length > 0) {
+          const loadedSkills = seekerSkills
+            .map((s: { skills: { name: string } | null }) => s.skills?.name)
+            .filter(Boolean) as string[]
+          setSkills(loadedSkills)
+        }
+      } catch (error) {
+        console.error('Error loading profile:', error)
+        toast.error('Failed to load profile data')
+      } finally {
+        setIsLoadingProfile(false)
+      }
+    }
+
+    loadProfile()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -125,13 +197,107 @@ export default function SeekerProfilePage() {
   }
 
   const onSubmit = async (data: ProfileFormData) => {
-    try {
-      // TODO: Save to Supabase
-      console.log('Saving profile:', { ...data, skills })
-      toast.success('Profile saved successfully!')
-    } catch {
-      toast.error('Failed to save profile')
+    if (!userId) {
+      toast.error('User not authenticated')
+      return
     }
+
+    setIsSaving(true)
+    try {
+      // 1. Update profiles table (full_name)
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({ full_name: data.fullName })
+        .eq('id', userId)
+
+      if (profileError) {
+        console.error('Profile update error:', profileError)
+        throw new Error(profileError.message)
+      }
+
+      // 2. Upsert seeker_profiles table
+      const { error: seekerError } = await supabase
+        .from('seeker_profiles')
+        .upsert({
+          id: userId,
+          bio: data.bio || null,
+          phone: data.phone || null,
+          location: data.location || null,
+          experience_summary: data.experience || '',
+          education_summary: data.education || '',
+        })
+
+      if (seekerError) {
+        console.error('Seeker profile update error:', seekerError)
+        throw new Error(seekerError.message)
+      }
+
+      // 3. Handle skills
+      if (skills.length > 0) {
+        // Upsert each skill into the skills table
+        for (const skillName of skills) {
+          const { error: skillError } = await supabase
+            .from('skills')
+            .upsert({ name: skillName }, { onConflict: 'name', ignoreDuplicates: true })
+
+          if (skillError) {
+            console.error('Skill insert error:', skillError)
+          }
+        }
+
+        // Get skill IDs
+        const { data: skillRecords } = await supabase
+          .from('skills')
+          .select('id, name')
+          .in('name', skills)
+
+        if (skillRecords) {
+          // Delete existing seeker_skills for this user
+          await supabase
+            .from('seeker_skills')
+            .delete()
+            .eq('seeker_id', userId)
+
+          // Insert new seeker_skills relationships
+          const seekerSkills = skillRecords.map((skill) => ({
+            seeker_id: userId,
+            skill_id: skill.id,
+          }))
+
+          const { error: seekerSkillsError } = await supabase
+            .from('seeker_skills')
+            .insert(seekerSkills)
+
+          if (seekerSkillsError) {
+            console.error('Seeker skills error:', seekerSkillsError)
+          }
+        }
+      } else {
+        // No skills — clear existing seeker_skills
+        await supabase
+          .from('seeker_skills')
+          .delete()
+          .eq('seeker_id', userId)
+      }
+
+      toast.success('Profile saved successfully!')
+    } catch (error) {
+      console.error('Error saving profile:', error)
+      toast.error('Failed to save profile')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  if (isLoadingProfile) {
+    return (
+      <div className="flex min-h-[400px] items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-emerald-600" />
+          <p className="text-sm text-gray-500">Loading your profile...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -384,9 +550,16 @@ export default function SeekerProfilePage() {
           <Button
             type="submit"
             className="bg-emerald-600 hover:bg-emerald-700"
-            disabled={!isDirty}
+            disabled={isSaving}
           >
-            Save Profile
+            {isSaving ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              'Save Profile'
+            )}
           </Button>
         </div>
       </form>

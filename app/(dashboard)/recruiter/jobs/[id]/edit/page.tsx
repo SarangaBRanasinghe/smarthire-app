@@ -168,7 +168,7 @@ export default function EditJobPage() {
     setIsLoading(true)
     try {
       // Update the job
-      // @ts-expect-error - Supabase type inference issue
+     
       const { error: jobError } = await supabase
         .from('jobs')
         .update({
@@ -202,7 +202,7 @@ export default function EditJobPage() {
       if (skills.length > 0) {
         // First, insert skills that don't exist
         for (const skillName of skills) {
-          // @ts-expect-error - Supabase type inference issue
+       
           const { error: skillError } = await supabase
             .from('skills')
             .upsert({ name: skillName }, { onConflict: 'name', ignoreDuplicates: true })
@@ -225,7 +225,6 @@ export default function EditJobPage() {
             skill_id: skill.id,
           }))
 
-          // @ts-expect-error - Supabase type inference issue
           const { error: jobSkillsError } = await supabase
             .from('job_skills')
             .insert(jobSkills)
