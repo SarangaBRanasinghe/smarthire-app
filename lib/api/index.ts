@@ -54,58 +54,21 @@ export const aiService = {
    * @returns Parsed CV data
    */
   async parseCV(file: File): Promise<ParsedCVData> {
-    // TODO: Replace with actual API call when FastAPI backend is ready
-    // const formData = new FormData()
-    // formData.append('file', file)
-    // const response = await apiClient.post('/api/parse-cv', formData, {
-    //   headers: { 'Content-Type': 'multipart/form-data' }
-    // })
-    // return response.data
+    const formData = new FormData()
+    formData.append('file', file)
 
-    // Mock implementation for demonstration
-    await new Promise(resolve => setTimeout(resolve, 2000)) // Simulate API delay
+    const response = await fetch('/api/parse-cv', {
+      method: 'POST',
+      body: formData,
+    })
 
-    return {
-      fullName: 'John Doe',
-      email: 'john.doe@email.com',
-      phone: '+94 77 123 4567',
-      location: 'Colombo, Sri Lanka',
-      bio: 'Experienced software engineer with 5+ years in full-stack development. Passionate about building scalable applications and mentoring junior developers.',
-      skills: ['JavaScript', 'TypeScript', 'React', 'Node.js', 'PostgreSQL', 'AWS', 'Docker'],
-      experience: [
-        {
-          id: '1',
-          title: 'Senior Software Engineer',
-          company: 'Tech Solutions Ltd',
-          location: 'Colombo',
-          startDate: '2021-01',
-          current: true,
-          description: 'Leading a team of 5 developers building enterprise solutions.',
-        },
-        {
-          id: '2',
-          title: 'Software Engineer',
-          company: 'Digital Innovations',
-          location: 'Colombo',
-          startDate: '2018-06',
-          endDate: '2020-12',
-          current: false,
-          description: 'Developed full-stack web applications using React and Node.js.',
-        },
-      ],
-      education: [
-        {
-          id: '1',
-          degree: 'BSc in Computer Science',
-          institution: 'University of Colombo',
-          location: 'Colombo',
-          startDate: '2014-09',
-          endDate: '2018-05',
-          current: false,
-          field: 'Computer Science',
-        },
-      ],
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Failed to parse CV' }))
+      throw new Error(errorData.error || `HTTP ${response.status}: Failed to parse CV`)
     }
+
+    const data = await response.json()
+    return data as ParsedCVData
   },
 
   /**
