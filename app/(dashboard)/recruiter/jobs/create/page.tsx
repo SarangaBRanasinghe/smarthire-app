@@ -64,6 +64,7 @@ export default function CreateJobPage() {
   const [newSkill, setNewSkill] = useState('')
   const [status, setStatus] = useState<'draft' | 'active'>('draft')
   const [recruiterId, setRecruiterId] = useState<string | null>(null)
+  const [companyName, setCompanyName] = useState('')
 
   const {
     register,
@@ -87,13 +88,15 @@ export default function CreateJobPage() {
         // Check if user has recruiter profile
         const { data: recruiterProfile } = await supabase
           .from('recruiter_profiles')
-          .select('id')
+          .select('id, company_name')
           .eq('id', user.id)
           .single()
         
         if (recruiterProfile) {
           // @ts-expect-error - Supabase type inference issue
           setRecruiterId(recruiterProfile.id)
+          // @ts-expect-error - Supabase type inference issue
+          setCompanyName(recruiterProfile.company_name || '')
         } else {
           toast.error('Recruiter profile not found')
           router.push('/recruiter/jobs')
@@ -133,6 +136,15 @@ export default function CreateJobPage() {
 
     setIsLoading(true)
     try {
+      // If recruiter edited company name, persist it back to their profile
+      if (companyName.trim()) {
+        await supabase
+          .from('recruiter_profiles')
+          // @ts-expect-error - Supabase type inference issue
+          .update({ company_name: companyName.trim() })
+          .eq('id', recruiterId)
+      }
+
       // Insert the job
       const { data: newJob, error: jobError } = await supabase
         .from('jobs')
@@ -243,6 +255,21 @@ export default function CreateJobPage() {
               />
               {errors.title && (
                 <p className="mt-1 text-sm text-red-500">{errors.title.message}</p>
+              )}
+            </div>
+
+            {/* Company Name */}
+            <div>
+              <Label htmlFor="companyName">Company Name *</Label>
+              <p className="text-xs text-gray-400 mb-1">Auto-filled from your recruiter profile. Edit if needed.</p>
+              <Input
+                id="companyName"
+                placeholder="e.g., Tech Solutions Ltd"
+                value={companyName}
+                onChange={(e) => setCompanyName(e.target.value)}
+              />
+              {!companyName.trim() && (
+                <p className="mt-1 text-xs text-amber-500">⚠ Company name will be visible to job seekers. Update your recruiter profile to set a default.</p>
               )}
             </div>
 
