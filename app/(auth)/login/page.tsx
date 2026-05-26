@@ -51,16 +51,22 @@ function LoginForm() {
   const supabase = createClient()
   const [isLoading, setIsLoading] = useState(false)
   const [isGoogleLoading, setIsGoogleLoading] = useState(false)
+  const [isVerified, setIsVerified] = useState(false)
 
-  // Check for OAuth error
+  // Check for URL params (errors or email verification)
   useEffect(() => {
     const authError = searchParams.get('error')
     const errorCode = searchParams.get('error_code')
     const errorDescription = searchParams.get('error_description')
-    
+    const verified = searchParams.get('verified')
+
+    if (verified === 'true') {
+      setIsVerified(true)
+    }
+
     if (authError) {
-      const message = errorDescription 
-        ? decodeURIComponent(errorDescription) 
+      const message = errorDescription
+        ? decodeURIComponent(errorDescription)
         : `Authentication failed (${errorCode || 'unknown'})`
       toast.error(message)
     }
@@ -107,7 +113,18 @@ function LoginForm() {
       })
 
       if (error) {
-        toast.error(error.message)
+        // Give a clearer message for common Supabase auth errors
+        if (
+          error.message.toLowerCase().includes('email not confirmed') ||
+          error.message.toLowerCase().includes('invalid login credentials')
+        ) {
+          toast.error(
+            'Login failed. If you just registered, please confirm your email first by clicking the link we sent you.',
+            { duration: 8000 }
+          )
+        } else {
+          toast.error(error.message)
+        }
         return
       }
 
@@ -147,6 +164,17 @@ function LoginForm() {
 
   return (
     <>
+      {/* Email Verified Banner */}
+      {isVerified && (
+        <div className="mb-6 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 flex items-start gap-3">
+          <span className="text-emerald-600 text-lg">✅</span>
+          <div>
+            <p className="text-sm font-semibold text-emerald-800">Email verified successfully!</p>
+            <p className="text-xs text-emerald-700 mt-0.5">You can now sign in with your email and password below.</p>
+          </div>
+        </div>
+      )}
+
       <div>
         <h2 className="text-2xl font-bold text-gray-900">Welcome back</h2>
         <p className="mt-2 text-sm text-gray-600">

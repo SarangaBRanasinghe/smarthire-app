@@ -118,14 +118,11 @@ function RegisterForm() {
         return
       }
 
-      toast.success('Account created! Please check your email to verify your account.')
+      toast.success('Account created! Please check your inbox for a verification email.')
 
-      // Redirect to appropriate dashboard
-      if (selectedRole === 'recruiter') {
-        router.push('/recruiter/overview')
-      } else {
-        router.push('/seeker/overview')
-      }
+      // Email confirmation is required — redirect to the "check your email" page
+      router.push(`/auth/verify-email?email=${encodeURIComponent(data.email)}&role=${selectedRole}`)
+
     } catch {
       toast.error('An unexpected error occurred')
     } finally {
