@@ -111,7 +111,7 @@ export async function GET(request: Request) {
     let redirectPath = '/seeker/overview'
     switch (existingProfile.role) {
       case 'admin':
-        redirectPath = '/admin/users'
+        redirectPath = '/admin/login'
         break
       case 'recruiter':
         redirectPath = '/recruiter/overview'

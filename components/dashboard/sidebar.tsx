@@ -11,7 +11,6 @@ import {
   User,
   Users,
   Plus,
-  BarChart3,
   Settings,
   Building2,
 } from 'lucide-react'
@@ -37,8 +36,7 @@ const navByRole: Record<UserRole, NavItem[]> = {
     { title: 'Candidates', href: '/recruiter/candidates', icon: <Users className="h-5 w-5" /> },
   ],
   admin: [
-    { title: 'User Management', href: '/admin/users', icon: <Users className="h-5 w-5" /> },
-    { title: 'Analytics', href: '/admin/analytics', icon: <BarChart3 className="h-5 w-5" /> },
+    { title: 'Company Verification', href: '/admin/companies', icon: <Building2 className="h-5 w-5" /> },
   ],
 }
 

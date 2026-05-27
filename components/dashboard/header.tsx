@@ -100,7 +100,7 @@ export function DashboardHeader({ pathname, mobileOpen, setMobileOpen }: Dashboa
               profile.role === 'recruiter'
                 ? '/recruiter/profile'
                 : profile.role === 'admin'
-                ? '/admin/users'
+                ? '/admin/companies'
                 : '/seeker/profile'
             }>
               <User className="mr-2 h-4 w-4" />

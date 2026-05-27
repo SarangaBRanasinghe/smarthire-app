@@ -60,7 +60,7 @@ export async function updateSession(request: NextRequest) {
         const url = request.nextUrl.clone()
         switch (profile.role) {
           case 'admin':
-            url.pathname = '/admin/users'
+            url.pathname = '/admin/login'
             break
           case 'recruiter':
             url.pathname = '/recruiter/overview'

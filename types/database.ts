@@ -92,6 +92,11 @@ export interface Database {
           company_logo: string | null
           company_website: string | null
           verification_status: boolean
+          verification_state: string
+          verification_requested_at: string | null
+          verification_reviewed_at: string | null
+          verification_reviewed_by: string | null
+          verification_notes: string | null
           created_at: string
           updated_at: string
         }
@@ -101,6 +106,11 @@ export interface Database {
           company_logo?: string | null
           company_website?: string | null
           verification_status?: boolean
+          verification_state?: string
+          verification_requested_at?: string | null
+          verification_reviewed_at?: string | null
+          verification_reviewed_by?: string | null
+          verification_notes?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -110,6 +120,11 @@ export interface Database {
           company_logo?: string | null
           company_website?: string | null
           verification_status?: boolean
+          verification_state?: string
+          verification_requested_at?: string | null
+          verification_reviewed_at?: string | null
+          verification_reviewed_by?: string | null
+          verification_notes?: string | null
           created_at?: string
           updated_at?: string
         }

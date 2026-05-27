@@ -142,7 +142,7 @@ function LoginForm() {
         if (profile) {
           switch (profile.role) {
             case 'admin':
-              router.push('/admin/users')
+              router.push('/admin/login')
               break
             case 'recruiter':
               router.push('/recruiter/overview')
