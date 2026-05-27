@@ -37,6 +37,7 @@ interface Application {
   jobId: string
   jobTitle: string
   company: string
+  companyLogo: string | null
   location: string
   jobType: string
   status: ApplicationStatus
@@ -139,9 +140,18 @@ function ApplicationCard({
       <CardContent className="p-6">
         <div className="flex items-start justify-between gap-4">
           <div className="flex gap-4">
-            {/* Company icon */}
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-gray-100">
-              <Building2 className="h-6 w-6 text-gray-400" />
+            {/* Company Logo */}
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-gray-100">
+              {application.companyLogo ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={application.companyLogo}
+                  alt={application.company}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <Building2 className="h-6 w-6 text-gray-400" />
+              )}
             </div>
             <div>
               <h3 className="font-semibold text-gray-900">{application.jobTitle}</h3>
@@ -264,16 +274,16 @@ export default function SeekerApplicationsPage() {
           jobMap[j.id] = j
         })
 
-        // Step 3: Fetch recruiter profiles for company names
+        // Step 3: Fetch recruiter profiles for company names and logos
         const recruiterIds = [...new Set((jobRows ?? []).map((j: { recruiter_id: string }) => j.recruiter_id))]
         const { data: recruiterRows } = await supabase
           .from('recruiter_profiles')
-          .select('id, company_name')
+          .select('id, company_name, company_logo')
           .in('id', recruiterIds)
 
-        const recruiterMap: Record<string, string> = {}
-        ;(recruiterRows ?? []).forEach((r: { id: string; company_name: string | null }) => {
-          recruiterMap[r.id] = r.company_name || 'Unknown Company'
+        const recruiterMap: Record<string, { name: string; logo: string | null }> = {}
+        ;(recruiterRows ?? []).forEach((r: { id: string; company_name: string | null; company_logo: string | null }) => {
+          recruiterMap[r.id] = { name: r.company_name || 'Unknown Company', logo: r.company_logo ?? null }
         })
 
         // Step 4: Fetch interviews for these applications
@@ -308,12 +318,13 @@ export default function SeekerApplicationsPage() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const built: Application[] = (appRows ?? []).map((app: any) => {
           const job = jobMap[app.job_id]
-          const company = job ? recruiterMap[job.recruiter_id] : 'Unknown Company'
+          const recruiter = job ? recruiterMap[job.recruiter_id] : null
           return {
             id: app.id,
             jobId: app.job_id,
             jobTitle: job?.title ?? 'Unknown Job',
-            company,
+            company: recruiter?.name ?? 'Unknown Company',
+            companyLogo: recruiter?.logo ?? null,
             location: job?.location ?? '',
             jobType: job?.type ?? '',
             status: app.status as ApplicationStatus,

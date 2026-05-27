@@ -36,6 +36,8 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
+  Globe,
+  ShieldCheck,
 } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -49,6 +51,8 @@ interface JobWithScore {
   title: string
   company: string
   companyLogo: string | null
+  companyWebsite: string | null
+  isVerified: boolean
   location: string
   type: string
   salary_min: number | null
@@ -172,7 +176,7 @@ export default function SeekerJobsPage() {
           salary_max,
           currency,
           created_at,
-          recruiter_profiles!inner(company_name, company_logo),
+          recruiter_profiles!inner(company_name, company_logo, company_website, verification_status),
           job_skills(skills(name))
         `)
         .eq('status', 'active')
@@ -205,12 +209,16 @@ export default function SeekerJobsPage() {
         const recruiter = job.recruiter_profiles
         const companyName = recruiter?.company_name ?? 'Unknown Company'
         const companyLogo = recruiter?.company_logo ?? null
+        const companyWebsite = recruiter?.company_website ?? null
+        const isVerified = recruiter?.verification_status ?? false
 
         return {
           id: job.id,
           title: job.title,
           company: companyName,
           companyLogo,
+          companyWebsite,
+          isVerified,
           location: job.location ?? 'Location not specified',
           type: job.type,
           salary_min: job.salary_min,
@@ -498,9 +506,29 @@ export default function SeekerJobsPage() {
                 <CardContent className="p-6">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex gap-4">
-                      {/* Company Logo */}
+                      {/* Company Logo — clickable if website is set */}
                       <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-gray-100">
-                        {job.companyLogo ? (
+                        {job.companyWebsite ? (
+                          <a
+                            href={job.companyWebsite.startsWith('http') ? job.companyWebsite : `https://${job.companyWebsite}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={`Visit ${job.company} website`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex h-full w-full items-center justify-center hover:opacity-80 transition-opacity"
+                          >
+                            {job.companyLogo ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={job.companyLogo}
+                                alt={job.company}
+                                className="h-full w-full object-cover"
+                              />
+                            ) : (
+                              <Building2 className="h-6 w-6 text-gray-400" />
+                            )}
+                          </a>
+                        ) : job.companyLogo ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={job.companyLogo}
@@ -513,8 +541,21 @@ export default function SeekerJobsPage() {
                       </div>
 
                       <div>
-                        <h3 className="font-semibold text-gray-900">{job.title}</h3>
-                        <p className="text-sm text-gray-500">{job.company}</p>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-semibold text-gray-900">{job.title}</h3>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-sm text-gray-500">{job.company}</p>
+                          {job.isVerified && (
+                            <span
+                              title="Verified Company"
+                              className="inline-flex items-center gap-0.5 rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 ring-1 ring-blue-200"
+                            >
+                              <ShieldCheck className="h-2.5 w-2.5" />
+                              Verified
+                            </span>
+                          )}
+                        </div>
                         <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-gray-500">
                           <span className="flex items-center gap-1">
                             <MapPin className="h-4 w-4" />
@@ -630,7 +671,22 @@ export default function SeekerJobsPage() {
               <DialogHeader>
                 <div className="flex items-start gap-4">
                   <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-gray-100">
-                    {selectedJob.companyLogo ? (
+                    {selectedJob.companyWebsite ? (
+                      <a
+                        href={selectedJob.companyWebsite.startsWith('http') ? selectedJob.companyWebsite : `https://${selectedJob.companyWebsite}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={`Visit ${selectedJob.company} website`}
+                        className="flex h-full w-full items-center justify-center hover:opacity-80 transition-opacity"
+                      >
+                        {selectedJob.companyLogo ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={selectedJob.companyLogo} alt={selectedJob.company} className="h-full w-full object-cover" />
+                        ) : (
+                          <Building2 className="h-7 w-7 text-gray-400" />
+                        )}
+                      </a>
+                    ) : selectedJob.companyLogo ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={selectedJob.companyLogo} alt={selectedJob.company} className="h-full w-full object-cover" />
                     ) : (
@@ -639,9 +695,17 @@ export default function SeekerJobsPage() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <DialogTitle className="text-xl">{selectedJob.title}</DialogTitle>
-                    <DialogDescription className="text-base font-medium text-gray-600">
-                      {selectedJob.company}
-                    </DialogDescription>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <DialogDescription className="text-base font-medium text-gray-600">
+                        {selectedJob.company}
+                      </DialogDescription>
+                      {selectedJob.isVerified && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-600 ring-1 ring-blue-200">
+                          <ShieldCheck className="h-3 w-3" />
+                          Verified
+                        </span>
+                      )}
+                    </div>
                   </div>
                   {selectedJob.matchScore >= 70 && (
                     <Badge className="shrink-0 bg-emerald-100 text-emerald-700 hover:bg-emerald-100 text-sm px-3 py-1">
@@ -672,6 +736,17 @@ export default function SeekerJobsPage() {
                   <Clock className="h-4 w-4 text-gray-400" />
                   Posted {timeAgo(selectedJob.created_at)}
                 </span>
+                {selectedJob.companyWebsite && (
+                  <a
+                    href={selectedJob.companyWebsite.startsWith('http') ? selectedJob.companyWebsite : `https://${selectedJob.companyWebsite}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 text-emerald-600 hover:text-emerald-700 hover:underline font-medium"
+                  >
+                    <Globe className="h-4 w-4" />
+                    Company Website
+                  </a>
+                )}
               </div>
 
               {/* AI Match summary */}

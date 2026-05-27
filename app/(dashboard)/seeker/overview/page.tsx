@@ -27,6 +27,7 @@ interface RecentApp {
   id: string
   jobTitle: string
   company: string
+  companyLogo: string | null
   appliedAt: string
   status: string
 }
@@ -146,24 +147,26 @@ export default function SeekerOverviewPage() {
             jobMap[j.id] = j
           })
 
-          // Company names
+          // Company names and logos
           const recruiterIds = [...new Set((jobRows ?? []).map((j: { recruiter_id: string }) => j.recruiter_id))]
           const { data: recruiterRows } = await supabase
             .from('recruiter_profiles')
-            .select('id, company_name')
+            .select('id, company_name, company_logo')
             .in('id', recruiterIds)
 
-          const companyMap: Record<string, string> = {}
-          ;(recruiterRows ?? []).forEach((r: { id: string; company_name: string | null }) => {
-            companyMap[r.id] = r.company_name || 'Unknown Company'
+          const companyMap: Record<string, { name: string; logo: string | null }> = {}
+          ;(recruiterRows ?? []).forEach((r: { id: string; company_name: string | null; company_logo: string | null }) => {
+            companyMap[r.id] = { name: r.company_name || 'Unknown Company', logo: r.company_logo ?? null }
           })
 
           setRecentApps(recent3.map((a) => {
             const job = jobMap[a.job_id]
+            const recruiter = job ? companyMap[job.recruiter_id] : null
             return {
               id: a.id,
               jobTitle: job?.title ?? 'Unknown Job',
-              company: job ? companyMap[job.recruiter_id] : 'Unknown Company',
+              company: recruiter?.name ?? 'Unknown Company',
+              companyLogo: recruiter?.logo ?? null,
               appliedAt: timeAgo(a.applied_at),
               status: a.status,
             }
@@ -363,8 +366,17 @@ export default function SeekerOverviewPage() {
                     className="flex items-center justify-between rounded-lg border p-4"
                   >
                     <div className="flex min-w-0 flex-1 items-center gap-3">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-100">
-                        <Building2 className="h-5 w-5 text-gray-400" />
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-gray-100">
+                        {app.companyLogo ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={app.companyLogo}
+                            alt={app.company}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <Building2 className="h-5 w-5 text-gray-400" />
+                        )}
                       </div>
                       <div className="min-w-0">
                         <h4 className="truncate font-medium text-gray-900">{app.jobTitle}</h4>
