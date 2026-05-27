@@ -26,12 +26,10 @@ import {
   Users,
   Edit,
   Eye,
-  Calendar,
   TrendingUp,
   Star,
-  Phone,
-  Video,
-  Building2,
+  Download,
+  FileText,
 } from 'lucide-react'
 import type { ApplicationStatus, JobStatus, JobType } from '@/types/database'
 
@@ -49,12 +47,14 @@ type Job = {
 }
 
 type Applicant = {
-  id: string
+  id: string           // application id
+  seekerId: string     // seeker's user id
   name: string
   email: string
   matchScore: number
   status: ApplicationStatus
   appliedAt: string
+  resumeUrl: string | null
 }
 
 const statusConfig: Record<ApplicationStatus, { label: string; color: string }> = {
@@ -109,7 +109,6 @@ export default function JobDetailsPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [selectedApplicant, setSelectedApplicant] = useState<Applicant | null>(null)
   const [isProfileDialogOpen, setIsProfileDialogOpen] = useState(false)
-  const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false)
 
   useEffect(() => {
     async function fetchJobDetails() {
@@ -145,46 +144,58 @@ export default function JobDetailsPage() {
           setSkills(skillNames)
         }
 
-        // Fetch applications
+        // ── Fetch applicants (flat queries, no nested joins) ────────────────
+
+        // Step 1: plain applications
         const { data: applicationsData, error: applicationsError } = await supabase
           .from('applications')
-          .select(`
-            id,
-            status,
-            ai_match_score,
-            applied_at,
-            seeker_profiles!inner(
-              id,
-              profiles!inner(
-                email,
-                full_name
-              )
-            )
-          `)
+          .select('id, seeker_id, status, ai_match_score, applied_at')
           .eq('job_id', jobId)
           .order('ai_match_score', { ascending: false })
 
-        if (!applicationsError && applicationsData) {
+        if (!applicationsError && applicationsData && applicationsData.length > 0) {
+          const seekerIds: string[] = applicationsData.map((a: { seeker_id: string }) => a.seeker_id)
+
+          // Step 2: profiles (name, email)
+          const { data: profileRows } = await supabase
+            .from('profiles')
+            .select('id, full_name, email')
+            .in('id', seekerIds)
+
+          const profileMap: Record<string, { full_name: string | null; email: string }> = {}
+          ;(profileRows ?? []).forEach((p: { id: string; full_name: string | null; email: string }) => {
+            profileMap[p.id] = p
+          })
+
+          // Step 3: seeker_profiles (resume_url)
+          const { data: seekerProfileRows } = await supabase
+            .from('seeker_profiles')
+            .select('id, resume_url')
+            .in('id', seekerIds)
+
+          const resumeMap: Record<string, string | null> = {}
+          ;(seekerProfileRows ?? []).forEach((sp: { id: string; resume_url: string | null }) => {
+            resumeMap[sp.id] = sp.resume_url
+          })
+
+          // Step 4: assemble
           const formattedApplicants: Applicant[] = applicationsData.map((app: {
             id: string
+            seeker_id: string
             status: string
             ai_match_score: number | null
             applied_at: string
-            seeker_profiles?: {
-              id: string
-              profiles?: {
-                email: string
-                full_name: string | null
-              }
-            }
           }) => ({
             id: app.id,
-            name: app.seeker_profiles?.profiles?.full_name || 'Unknown',
-            email: app.seeker_profiles?.profiles?.email || '',
+            seekerId: app.seeker_id,
+            name: profileMap[app.seeker_id]?.full_name || 'Unknown',
+            email: profileMap[app.seeker_id]?.email || '',
             matchScore: app.ai_match_score || 0,
             status: app.status as ApplicationStatus,
             appliedAt: app.applied_at,
+            resumeUrl: resumeMap[app.seeker_id] ?? null,
           }))
+
           setApplicants(formattedApplicants)
         }
       } catch (error) {
@@ -198,10 +209,32 @@ export default function JobDetailsPage() {
     fetchJobDetails()
   }, [jobId, supabase, router])
 
-  const handleScheduleInterview = () => {
-    toast.success(`Interview scheduled with ${selectedApplicant?.name}`)
-    setIsScheduleDialogOpen(false)
-    setSelectedApplicant(null)
+
+  const handleDownloadResume = async () => {
+    if (!selectedApplicant) return
+
+    const resumeUrl = selectedApplicant.resumeUrl
+    if (!resumeUrl) {
+      toast.error('No resume uploaded by this candidate.')
+      return
+    }
+
+    try {
+      // resumeUrl is stored as the storage path (e.g. "resumes/user-id/file.pdf")
+      // Try to create a signed URL for private buckets, otherwise open directly
+      const { data: signedData, error: signedError } = await supabase.storage
+        .from('resumes')
+        .createSignedUrl(resumeUrl.replace(/^.*resumes\//, ''), 60)
+
+      if (!signedError && signedData?.signedUrl) {
+        window.open(signedData.signedUrl, '_blank')
+      } else {
+        // Fallback: try opening the URL directly (public bucket)
+        window.open(resumeUrl, '_blank')
+      }
+    } catch {
+      toast.error('Failed to download resume. Please try again.')
+    }
   }
 
   if (isLoading) {
@@ -404,17 +437,6 @@ export default function JobDetailsPage() {
                       <Eye className="mr-1 h-4 w-4" />
                       View Profile
                     </Button>
-                    <Button
-                      className="bg-emerald-600 hover:bg-emerald-700"
-                      size="sm"
-                      onClick={() => {
-                        setSelectedApplicant(applicant)
-                        setIsScheduleDialogOpen(true)
-                      }}
-                    >
-                      <Calendar className="mr-1 h-4 w-4" />
-                      Schedule Interview
-                    </Button>
                   </div>
                 </div>
               </CardContent>
@@ -477,12 +499,18 @@ export default function JobDetailsPage() {
               </div>
 
               <div className="flex gap-2">
-                <Button className="flex-1 bg-emerald-600 hover:bg-emerald-700">
-                  <Calendar className="mr-2 h-4 w-4" />
-                  Schedule Interview
-                </Button>
-                <Button variant="outline" className="flex-1">
-                  Download Resume
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={handleDownloadResume}
+                  disabled={!selectedApplicant?.resumeUrl}
+                  title={selectedApplicant?.resumeUrl ? 'Download resume' : 'No resume uploaded'}
+                >
+                  {selectedApplicant?.resumeUrl ? (
+                    <><Download className="mr-2 h-4 w-4" />Download Resume</>
+                  ) : (
+                    <><FileText className="mr-2 h-4 w-4" />No Resume</>  
+                  )}
                 </Button>
               </div>
             </div>
@@ -490,42 +518,6 @@ export default function JobDetailsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Schedule Interview Dialog */}
-      <Dialog open={isScheduleDialogOpen} onOpenChange={setIsScheduleDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Schedule Interview</DialogTitle>
-            <DialogDescription>
-              Schedule an interview with {selectedApplicant?.name}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="grid grid-cols-3 gap-2">
-              <Button variant="outline" className="flex flex-col gap-1 py-4">
-                <Video className="h-5 w-5" />
-                <span className="text-xs">Video Call</span>
-              </Button>
-              <Button variant="outline" className="flex flex-col gap-1 py-4">
-                <Phone className="h-5 w-5" />
-                <span className="text-xs">Phone Call</span>
-              </Button>
-              <Button variant="outline" className="flex flex-col gap-1 py-4">
-                <Building2 className="h-5 w-5" />
-                <span className="text-xs">In Person</span>
-              </Button>
-            </div>
-            <p className="text-sm text-gray-500">
-              Select a date and time for the interview. The candidate will be notified via email.
-            </p>
-            <Button
-              className="w-full bg-emerald-600 hover:bg-emerald-700"
-              onClick={handleScheduleInterview}
-            >
-              Confirm Interview
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

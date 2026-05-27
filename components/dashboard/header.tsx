@@ -98,7 +98,7 @@ export function DashboardHeader({ pathname, mobileOpen, setMobileOpen }: Dashboa
           <DropdownMenuItem asChild>
             <Link href={
               profile.role === 'recruiter'
-                ? '/recruiter/overview'
+                ? '/recruiter/profile'
                 : profile.role === 'admin'
                 ? '/admin/users'
                 : '/seeker/profile'

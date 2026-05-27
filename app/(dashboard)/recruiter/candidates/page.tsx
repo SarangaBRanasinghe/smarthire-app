@@ -20,6 +20,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 import {
   Sparkles,
@@ -38,6 +41,9 @@ import {
   AlertCircle,
   CheckCircle2,
   Briefcase,
+  Link as LinkIcon,
+  MonitorPlay,
+  Users2,
 } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -127,6 +133,16 @@ export default function CandidatesPage() {
   const [isProfileDialogOpen, setIsProfileDialogOpen] = useState(false)
   const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false)
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null)
+
+  // Interview form state
+  const [interviewType, setInterviewType] = useState<'video' | 'phone' | 'in_person'>('video')
+  const [interviewPlatform, setInterviewPlatform] = useState<'zoom' | 'teams' | 'other'>('zoom')
+  const [interviewDate, setInterviewDate] = useState('')
+  const [interviewTime, setInterviewTime] = useState('')
+  const [meetingLink, setMeetingLink] = useState('')
+  const [physicalAddress, setPhysicalAddress] = useState('')
+  const [interviewNotes, setInterviewNotes] = useState('')
+  const [isSubmittingInterview, setIsSubmittingInterview] = useState(false)
 
   // ── Load recruiter's jobs ──────────────────────────────────────────────────
 
@@ -337,6 +353,66 @@ export default function CandidatesPage() {
       toast.error('Failed to update status')
     } finally {
       setUpdatingStatusId(null)
+    }
+  }
+
+  // ── Confirm Interview ──────────────────────────────────────────────────────
+
+  const resetInterviewForm = () => {
+    setInterviewType('video')
+    setInterviewPlatform('zoom')
+    setInterviewDate('')
+    setInterviewTime('')
+    setMeetingLink('')
+    setPhysicalAddress('')
+    setInterviewNotes('')
+  }
+
+  const handleConfirmInterview = async () => {
+    if (!selectedCandidate) return
+    if (!interviewDate || !interviewTime) {
+      toast.error('Please select both a date and time for the interview.')
+      return
+    }
+    if (interviewType !== 'in_person' && !meetingLink) {
+      toast.error('Please provide a meeting link for the online interview.')
+      return
+    }
+    if (interviewType === 'in_person' && !physicalAddress) {
+      toast.error('Please provide the interview location address.')
+      return
+    }
+
+    setIsSubmittingInterview(true)
+    try {
+      const scheduledAt = new Date(`${interviewDate}T${interviewTime}`).toISOString()
+
+      // Insert interview record
+      const { error: ivError } = await supabase
+        .from('interviews')
+        // @ts-expect-error - Supabase type inference
+        .insert({
+          application_id: selectedCandidate.applicationId,
+          scheduled_at: scheduledAt,
+          type: interviewType,
+          meeting_link: interviewType !== 'in_person' ? meetingLink : null,
+          location_address: interviewType === 'in_person' ? physicalAddress : null,
+          notes: interviewNotes || null,
+        })
+
+      if (ivError) throw ivError
+
+      // Update status to interview
+      await handleStatusChange(selectedCandidate.applicationId, 'interview')
+
+      toast.success(`Interview scheduled with ${selectedCandidate.name}!`)
+      setIsScheduleDialogOpen(false)
+      resetInterviewForm()
+    } catch (err) {
+      console.error('Interview scheduling error:', err)
+      toast.error('Failed to schedule interview. Please try again.')
+    } finally {
+      setIsSubmittingInterview(false)
     }
   }
 
@@ -813,57 +889,207 @@ export default function CandidatesPage() {
       </Dialog>
 
       {/* ── Schedule Interview Dialog ──────────────────────────────────────── */}
-      <Dialog open={isScheduleDialogOpen} onOpenChange={setIsScheduleDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+      <Dialog
+        open={isScheduleDialogOpen}
+        onOpenChange={(open) => {
+          setIsScheduleDialogOpen(open)
+          if (!open) resetInterviewForm()
+        }}
+      >
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Schedule Interview</DialogTitle>
             <DialogDescription>
-              Schedule an interview with {selectedCandidate?.name}
+              Arrange an interview with{' '}
+              <span className="font-medium text-gray-700">{selectedCandidate?.name}</span>
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="grid grid-cols-3 gap-2">
+
+          <div className="space-y-5 py-2">
+
+            {/* Interview Type */}
+            <div>
+              <Label className="text-sm font-medium text-gray-700 mb-2 block">Interview Type</Label>
+              <div className="grid grid-cols-3 gap-2">
+                {([
+                  { type: 'video' as const, icon: <Video className="h-5 w-5" />, label: 'Online' },
+                  { type: 'phone' as const, icon: <PhoneCall className="h-5 w-5" />, label: 'Phone Call' },
+                  { type: 'in_person' as const, icon: <Building2 className="h-5 w-5" />, label: 'In Person' },
+                ]).map(({ type, icon, label }) => (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => setInterviewType(type)}
+                    className={`flex flex-col items-center gap-2 rounded-lg border p-3 text-sm transition-all ${
+                      interviewType === type
+                        ? 'border-emerald-500 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-400'
+                        : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    {icon}
+                    <span className="text-xs font-medium">{label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Online Platform (shown only for video type) */}
+            {interviewType === 'video' && (
+              <div>
+                <Label className="text-sm font-medium text-gray-700 mb-2 block">Platform</Label>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    { id: 'zoom' as const, icon: <MonitorPlay className="h-4 w-4" />, label: 'Zoom' },
+                    { id: 'teams' as const, icon: <Users2 className="h-4 w-4" />, label: 'MS Teams' },
+                    { id: 'other' as const, icon: <Video className="h-4 w-4" />, label: 'Other' },
+                  ]).map(({ id, icon, label }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => setInterviewPlatform(id)}
+                      className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs transition-all ${
+                        interviewPlatform === id
+                          ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+                          : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      {icon} {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Date & Time */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="iv-date" className="text-sm font-medium text-gray-700">Date *</Label>
+                <Input
+                  id="iv-date"
+                  type="date"
+                  className="mt-1"
+                  value={interviewDate}
+                  min={new Date().toISOString().split('T')[0]}
+                  onChange={(e) => setInterviewDate(e.target.value)}
+                />
+              </div>
+              <div>
+                <Label htmlFor="iv-time" className="text-sm font-medium text-gray-700">Time *</Label>
+                <Input
+                  id="iv-time"
+                  type="time"
+                  className="mt-1"
+                  value={interviewTime}
+                  onChange={(e) => setInterviewTime(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {/* Meeting Link (Online / Phone) */}
+            {interviewType !== 'in_person' && (
+              <div>
+                <Label htmlFor="iv-link" className="text-sm font-medium text-gray-700">
+                  {interviewType === 'video' ? 'Meeting Link *' : 'Phone Number / Call Link *'}
+                </Label>
+                <div className="relative mt-1">
+                  <LinkIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                  <Input
+                    id="iv-link"
+                    placeholder={
+                      interviewType === 'video'
+                        ? interviewPlatform === 'zoom'
+                          ? 'https://zoom.us/j/...'
+                          : interviewPlatform === 'teams'
+                          ? 'https://teams.microsoft.com/...'
+                          : 'https://meet.google.com/...'
+                        : '+94 77 000 0000 or call link'
+                    }
+                    className="pl-10"
+                    value={meetingLink}
+                    onChange={(e) => setMeetingLink(e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Physical Address (In-Person) */}
+            {interviewType === 'in_person' && (
+              <div>
+                <Label htmlFor="iv-addr" className="text-sm font-medium text-gray-700">
+                  Interview Location *
+                </Label>
+                <Input
+                  id="iv-addr"
+                  placeholder="e.g. 42 Main St, Colombo 03, Level 5, Conference Room A"
+                  className="mt-1"
+                  value={physicalAddress}
+                  onChange={(e) => setPhysicalAddress(e.target.value)}
+                />
+              </div>
+            )}
+
+            {/* Notes */}
+            <div>
+              <Label htmlFor="iv-notes" className="text-sm font-medium text-gray-700">
+                Additional Notes
+                <span className="ml-1 font-normal text-gray-400">(Optional)</span>
+              </Label>
+              <Textarea
+                id="iv-notes"
+                placeholder="Any instructions for the candidate, dress code, what to bring, etc."
+                className="mt-1"
+                rows={3}
+                value={interviewNotes}
+                onChange={(e) => setInterviewNotes(e.target.value)}
+              />
+            </div>
+
+            {/* Summary Preview */}
+            {interviewDate && interviewTime && (
+              <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-3 text-sm">
+                <p className="font-medium text-emerald-700 mb-1">📅 Interview Summary</p>
+                <p className="text-emerald-600">
+                  <strong>{selectedCandidate?.name}</strong> ·{' '}
+                  {interviewType === 'video'
+                    ? `Online via ${interviewPlatform === 'zoom' ? 'Zoom' : interviewPlatform === 'teams' ? 'MS Teams' : 'Video'}`
+                    : interviewType === 'phone'
+                    ? 'Phone Call'
+                    : 'In Person'}
+                </p>
+                <p className="text-emerald-600">
+                  {new Date(`${interviewDate}T${interviewTime}`).toLocaleString('en-US', {
+                    weekday: 'short', month: 'short', day: 'numeric',
+                    year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
+                  })}
+                </p>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex gap-3 pt-1">
               <Button
                 variant="outline"
-                className="flex flex-col gap-2 py-4"
+                className="flex-1"
                 onClick={() => {
-                  handleStatusChange(selectedCandidate?.applicationId ?? '', 'interview')
-                  toast.success(`Video interview scheduled with ${selectedCandidate?.name}`)
                   setIsScheduleDialogOpen(false)
+                  resetInterviewForm()
                 }}
+                disabled={isSubmittingInterview}
               >
-                <Video className="h-5 w-5" />
-                <span className="text-xs">Video Call</span>
+                Cancel
               </Button>
               <Button
-                variant="outline"
-                className="flex flex-col gap-2 py-4"
-                onClick={() => {
-                  handleStatusChange(selectedCandidate?.applicationId ?? '', 'interview')
-                  toast.success(`Phone interview scheduled with ${selectedCandidate?.name}`)
-                  setIsScheduleDialogOpen(false)
-                }}
+                className="flex-1 bg-emerald-600 hover:bg-emerald-700"
+                onClick={handleConfirmInterview}
+                disabled={isSubmittingInterview}
               >
-                <PhoneCall className="h-5 w-5" />
-                <span className="text-xs">Phone Call</span>
-              </Button>
-              <Button
-                variant="outline"
-                className="flex flex-col gap-2 py-4"
-                onClick={() => {
-                  handleStatusChange(selectedCandidate?.applicationId ?? '', 'interview')
-                  toast.success(`In-person interview scheduled with ${selectedCandidate?.name}`)
-                  setIsScheduleDialogOpen(false)
-                }}
-              >
-                <Building2 className="h-5 w-5" />
-                <span className="text-xs">In Person</span>
+                {isSubmittingInterview ? (
+                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Scheduling...</>
+                ) : (
+                  <><Calendar className="mr-2 h-4 w-4" />Confirm Interview</>
+                )}
               </Button>
             </div>
-            <p className="text-sm text-gray-500">
-              Selecting an interview type will update the application status to{' '}
-              <strong>Interview</strong> and notify the candidate.
-            </p>
           </div>
         </DialogContent>
       </Dialog>
