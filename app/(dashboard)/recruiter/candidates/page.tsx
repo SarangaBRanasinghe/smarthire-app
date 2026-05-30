@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import {
   Select,
   SelectContent,
@@ -60,6 +60,7 @@ interface Candidate {
   seekerId: string
   name: string
   email: string
+  avatarUrl: string
   phone: string
   location: string
   bio: string
@@ -125,7 +126,6 @@ export default function CandidatesPage() {
   const [candidates, setCandidates] = useState<Candidate[]>([])
   const [isLoadingJobs, setIsLoadingJobs] = useState(true)
   const [isLoadingCandidates, setIsLoadingCandidates] = useState(false)
-  const [recruiterId, setRecruiterId] = useState<string | null>(null)
 
   // UI
   const [selectedJobId, setSelectedJobId] = useState<string>('')
@@ -133,6 +133,10 @@ export default function CandidatesPage() {
   const [isProfileDialogOpen, setIsProfileDialogOpen] = useState(false)
   const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false)
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null)
+  const [isAiRanking, setIsAiRanking] = useState(false)
+  const [aiQuotaBlockedUntil, setAiQuotaBlockedUntil] = useState<number | null>(null)
+  const [aiDailyQuotaExceeded, setAiDailyQuotaExceeded] = useState(false)
+  const [aiQuotaExceeded, setAiQuotaExceeded] = useState(false)
 
   // Interview form state
   const [interviewType, setInterviewType] = useState<'video' | 'phone' | 'in_person'>('video')
@@ -152,8 +156,6 @@ export default function CandidatesPage() {
       try {
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) return
-        setRecruiterId(user.id)
-
         // Fetch recruiter's active (and draft) jobs with their skill requirements
         const { data: jobRows, error } = await supabase
           .from('jobs')
@@ -235,11 +237,11 @@ export default function CandidatesPage() {
       // ── Step 2: Fetch profiles (name, email) ────────────────────────────
       const { data: profileRows } = await supabase
         .from('profiles')
-        .select('id, full_name, email')
+        .select('id, full_name, email, avatar_url')
         .in('id', seekerIds)
 
-      const profileMap: Record<string, { full_name: string | null; email: string }> = {}
-      ;(profileRows ?? []).forEach((p: { id: string; full_name: string | null; email: string }) => {
+      const profileMap: Record<string, { full_name: string | null; email: string; avatar_url: string | null }> = {}
+      ;(profileRows ?? []).forEach((p: { id: string; full_name: string | null; email: string; avatar_url: string | null }) => {
         profileMap[p.id] = p
       })
 
@@ -264,7 +266,7 @@ export default function CandidatesPage() {
       })
 
       // ── Step 4: Fetch seeker skills ──────────────────────────────────────
-      let seekerSkillsMap: Record<string, string[]> = {}
+      const seekerSkillsMap: Record<string, string[]> = {}
       seekerIds.forEach((id) => { seekerSkillsMap[id] = [] })
 
       const { data: skillRows } = await supabase
@@ -295,6 +297,7 @@ export default function CandidatesPage() {
           seekerId: app.seeker_id,
           name: profile?.full_name || 'Unknown',
           email: profile?.email || '',
+          avatarUrl: profile?.avatar_url || '',
           phone: sp?.phone || '',
           location: sp?.location || 'Not specified',
           bio: sp?.bio || '',
@@ -326,6 +329,90 @@ export default function CandidatesPage() {
   useEffect(() => {
     if (selectedJobId) loadCandidates(selectedJobId)
   }, [selectedJobId, loadCandidates])
+
+  const runAiRanking = async () => {
+    if (!selectedJobId || candidates.length === 0) return
+
+    const now = Date.now()
+    if (aiDailyQuotaExceeded) {
+      toast.error('Daily Gemini free-tier quota reached. Try again tomorrow.')
+      return
+    }
+    if (aiQuotaBlockedUntil && now < aiQuotaBlockedUntil) {
+      const seconds = Math.ceil((aiQuotaBlockedUntil - now) / 1000)
+      toast.error(`AI quota cooldown. Try again in ${seconds}s.`)
+      return
+    }
+
+    const selectedJob = jobs.find((j) => j.id === selectedJobId)
+    if (!selectedJob) return
+
+    setIsAiRanking(true)
+    try {
+      const response = await fetch('/api/candidate-rank', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          job: {
+            id: selectedJob.id,
+            title: selectedJob.title,
+            skills: selectedJob.requiredSkills,
+          },
+          candidates: candidates.map((c) => ({
+            seekerId: c.seekerId,
+            name: c.name,
+            bio: c.bio,
+            skills: c.skills,
+            experience: c.experienceSummary,
+            education: c.educationSummary,
+            location: c.location,
+          })),
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Failed to rank candidates' }))
+        const errorMessage = errorData.error || `HTTP ${response.status}: Failed to rank candidates`
+        const retrySeconds = Number(errorData.retryAfterSeconds || 0)
+        if (response.status === 429) {
+          setAiQuotaExceeded(true)
+          if (retrySeconds > 0) {
+            setAiQuotaBlockedUntil(Date.now() + retrySeconds * 1000)
+          }
+        }
+        throw new Error(errorMessage)
+      }
+
+      const data = await response.json() as { results?: Array<{ seekerId: string; score: number }> }
+      const scoreMap = new Map<string, number>(
+        (data?.results || []).map((item) => [item.seekerId, item.score])
+      )
+
+      const ranked: Candidate[] = candidates.map((c) => ({
+        ...c,
+        matchScore: scoreMap.get(c.seekerId) ?? c.matchScore,
+      }))
+
+      ranked.sort((a, b) => b.matchScore - a.matchScore)
+      ranked.forEach((c, i) => { c.rank = i + 1 })
+      setCandidates(ranked)
+      setAiQuotaExceeded(false)
+      setAiDailyQuotaExceeded(false)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : ''
+      const isQuota = message.toLowerCase().includes('quota') || message.includes('429')
+      if (isQuota) {
+        const isDaily = /per\s*day|GenerateRequestsPerDay|daily/i.test(message)
+        setAiDailyQuotaExceeded(isDaily)
+        toast.error('AI ranking paused due to Gemini free-tier quota. Try again later.')
+      } else {
+        console.error('AI ranking error:', err)
+        toast.error('AI ranking failed. Showing local ranking.')
+      }
+    } finally {
+      setIsAiRanking(false)
+    }
+  }
 
   // ── Update application status ──────────────────────────────────────────────
 
@@ -439,6 +526,23 @@ export default function CandidatesPage() {
     ? Math.round(candidates.reduce((s, c) => s + c.matchScore, 0) / candidates.length)
     : 0
 
+  const isAiCooldown = Boolean(aiDailyQuotaExceeded || (aiQuotaBlockedUntil && Date.now() < aiQuotaBlockedUntil))
+  const aiButtonDisabled = isAiRanking || isAiCooldown || candidates.length === 0 || !selectedJobId
+  const aiButtonLabel = isAiRanking
+    ? 'AI ranking...'
+    : aiQuotaExceeded
+      ? 'Retry AI ranking'
+      : 'Run AI ranking'
+  const aiDisabledReason = candidates.length === 0
+    ? 'Add applicants to enable AI ranking.'
+    : aiDailyQuotaExceeded
+      ? 'Daily quota reached. Try again after the daily reset.'
+      : aiQuotaBlockedUntil && Date.now() < aiQuotaBlockedUntil
+        ? `Rate limit hit. Try again in ${Math.ceil((aiQuotaBlockedUntil - Date.now()) / 1000)}s.`
+        : isAiRanking
+          ? 'AI ranking is running.'
+          : ''
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
@@ -479,12 +583,28 @@ export default function CandidatesPage() {
                 </SelectContent>
               </Select>
             )}
+            <div className="ml-auto flex flex-col items-end gap-1">
+              <Button
+                size="sm"
+                className={aiButtonDisabled
+                  ? 'border-gray-300 text-gray-400 bg-white'
+                  : 'bg-emerald-600 text-white hover:bg-emerald-700'}
+                variant={aiButtonDisabled ? 'outline' : 'default'}
+                onClick={runAiRanking}
+                disabled={aiButtonDisabled}
+              >
+                {aiButtonLabel}
+              </Button>
+              {aiButtonDisabled && aiDisabledReason && (
+                <span className="text-xs text-gray-400">{aiDisabledReason}</span>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>
 
       {/* AI Insights Card */}
-      <Card className="border-emerald-200 bg-gradient-to-r from-emerald-50 to-white">
+      <Card className="border-emerald-200 bg-linear-to-r from-emerald-50 to-white">
         <CardHeader className="pb-3">
           <div className="flex items-center gap-2">
             <TrendingUp className="h-5 w-5 text-emerald-600" />
@@ -554,6 +674,9 @@ export default function CandidatesPage() {
                         {candidate.rank === 1 ? <Star className="h-6 w-6" /> : `#${candidate.rank}`}
                       </div>
                       <Avatar className="h-16 w-16">
+                        {candidate.avatarUrl && (
+                          <AvatarImage src={candidate.avatarUrl} alt={`${candidate.name} avatar`} />
+                        )}
                         <AvatarFallback className="bg-emerald-100 text-lg text-emerald-700">
                           {candidate.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
                         </AvatarFallback>
@@ -722,6 +845,9 @@ export default function CandidatesPage() {
               {/* Header */}
               <div className="flex items-start gap-4">
                 <Avatar className="h-20 w-20 shrink-0">
+                  {selectedCandidate.avatarUrl && (
+                    <AvatarImage src={selectedCandidate.avatarUrl} alt={`${selectedCandidate.name} avatar`} />
+                  )}
                   <AvatarFallback className="bg-emerald-100 text-2xl text-emerald-700">
                     {selectedCandidate.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
                   </AvatarFallback>

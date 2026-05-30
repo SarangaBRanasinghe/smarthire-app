@@ -46,6 +46,29 @@ export interface MatchScoreResult {
   gaps: string[]
 }
 
+export interface JobMatchBatchResult {
+  jobId: string
+  score: number
+}
+
+export interface JobMatchBatchRequest {
+  seekerProfile: {
+    bio?: string
+    experience?: string
+    education?: string
+    skills?: string[]
+    location?: string
+  }
+  jobs: Array<{
+    id: string
+    title?: string
+    description?: string
+    skills?: string[]
+    location?: string
+    company?: string
+  }>
+}
+
 // Mock implementation - will be replaced with actual API calls
 export const aiService = {
   /**
@@ -126,6 +149,26 @@ export const aiService = {
     // Mock implementation - will return empty array, actual scores computed elsewhere
     await new Promise(resolve => setTimeout(resolve, 300))
     return []
+  },
+
+  /**
+   * Get AI match scores for a batch of jobs.
+   * @param payload - Seeker profile + jobs to score
+   */
+  async getJobMatchScores(payload: JobMatchBatchRequest): Promise<JobMatchBatchResult[]> {
+    const response = await fetch('/api/match-score', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Failed to compute match scores' }))
+      throw new Error(errorData.error || `HTTP ${response.status}: Failed to compute match scores`)
+    }
+
+    const data = await response.json()
+    return (data?.results || []) as JobMatchBatchResult[]
   },
 
   /**

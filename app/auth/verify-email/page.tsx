@@ -20,9 +20,7 @@ function VerifyEmailContent() {
       {/* Heading */}
       <h2 className="text-2xl font-bold text-gray-900">Check your inbox</h2>
       <p className="mt-3 text-sm text-gray-600 max-w-sm">
-        We sent a verification link to{' '}
-        <span className="font-semibold text-gray-900">{email}</span>.
-        Click the link in that email to verify your account.
+        <span className="font-semibold text-gray-900">{email}</span>
       </p>
 
       {/* Steps */}

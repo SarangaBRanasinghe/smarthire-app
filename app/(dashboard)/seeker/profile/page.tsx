@@ -1,11 +1,13 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
+import Image from 'next/image'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -27,6 +29,7 @@ import {
   MapPin,
   Briefcase,
   GraduationCap,
+  ImageIcon,
 } from 'lucide-react'
 
 const profileSchema = z.object({
@@ -50,7 +53,10 @@ export default function SeekerProfilePage() {
   const [newSkill, setNewSkill] = useState('')
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
+  const [avatarUrl, setAvatarUrl] = useState('')
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const avatarInputRef = useRef<HTMLInputElement>(null)
 
   const {
     register,
@@ -83,12 +89,12 @@ export default function SeekerProfilePage() {
 
         setUserId(user.id)
 
-        // Fetch profile (full_name, email)
+        // Fetch profile (full_name, email, avatar_url)
         const { data: profile } = await supabase
           .from('profiles')
-          .select('full_name, email')
+          .select('full_name, email, avatar_url')
           .eq('id', user.id)
-          .single<{ full_name: string | null; email: string }>()
+          .single<{ full_name: string | null; email: string; avatar_url: string | null }>()
 
         // Fetch seeker_profile (bio, phone, location, experience_summary, education_summary)
         const { data: seekerProfile } = await supabase
@@ -123,6 +129,8 @@ export default function SeekerProfilePage() {
             ? seekerProfile.education_summary
             : '',
         })
+
+        setAvatarUrl(profile?.avatar_url || '')
 
         // Populate skills
         if (seekerSkills && seekerSkills.length > 0) {
@@ -200,6 +208,79 @@ export default function SeekerProfilePage() {
 
   const handleRemoveSkill = (skillToRemove: string) => {
     setSkills(skills.filter((skill) => skill !== skillToRemove))
+  }
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    const allowed = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml']
+    if (!allowed.includes(file.type)) {
+      toast.error('Please upload a PNG, JPG, WebP or SVG image.')
+      return
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('Image must be smaller than 2 MB.')
+      return
+    }
+
+    setIsUploadingAvatar(true)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
+
+      const { error: profileError } = await supabase
+        .from('profiles')
+        // @ts-expect-error - Supabase type inference issue
+        .update({ avatar_url: base64 })
+        .eq('id', user.id)
+
+      if (profileError) {
+        throw new Error(profileError.message)
+      }
+
+      setAvatarUrl(base64)
+      toast.success('Profile photo updated!')
+    } catch (error) {
+      console.error('Avatar upload error:', error)
+      toast.error('Failed to upload profile photo.')
+    } finally {
+      setIsUploadingAvatar(false)
+      if (avatarInputRef.current) avatarInputRef.current.value = ''
+    }
+  }
+
+  const handleRemoveAvatar = async () => {
+    setIsUploadingAvatar(true)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const { error: profileError } = await supabase
+        .from('profiles')
+        // @ts-expect-error - Supabase type inference issue
+        .update({ avatar_url: null })
+        .eq('id', user.id)
+
+      if (profileError) {
+        throw new Error(profileError.message)
+      }
+
+      setAvatarUrl('')
+      toast.success('Profile photo removed.')
+    } catch (error) {
+      console.error('Avatar remove error:', error)
+      toast.error('Failed to remove profile photo.')
+    } finally {
+      setIsUploadingAvatar(false)
+    }
   }
 
   const onSubmit = async (data: ProfileFormData) => {
@@ -395,6 +476,71 @@ export default function SeekerProfilePage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
+            <div>
+              <Label className="mb-2 block">Profile Photo</Label>
+              <div className="flex items-center gap-4">
+                <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full border-2 border-dashed border-gray-200 bg-gray-50 overflow-hidden">
+                  {isUploadingAvatar ? (
+                    <Loader2 className="h-6 w-6 animate-spin text-emerald-500" />
+                  ) : avatarUrl ? (
+                    <Image
+                      src={avatarUrl}
+                      alt="Profile photo"
+                      width={80}
+                      height={80}
+                      className="h-full w-full object-cover"
+                      unoptimized
+                    />
+                  ) : (
+                    <Avatar className="h-20 w-20">
+                      <AvatarFallback className="bg-emerald-100 text-xl font-semibold text-emerald-700">
+                        <ImageIcon className="h-6 w-6 text-emerald-600" />
+                      </AvatarFallback>
+                    </Avatar>
+                  )}
+                </div>
+
+                <div className="flex-1 space-y-2">
+                  <p className="text-xs text-gray-500">
+                    PNG, JPG, WebP or SVG · Max 2 MB · Recommended: 256×256 px
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={isUploadingAvatar}
+                      onClick={() => avatarInputRef.current?.click()}
+                    >
+                      <Upload className="mr-1 h-4 w-4" />
+                      {avatarUrl ? 'Change Photo' : 'Upload Photo'}
+                    </Button>
+                    {avatarUrl && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={isUploadingAvatar}
+                        className="text-red-500 hover:text-red-600"
+                        onClick={handleRemoveAvatar}
+                      >
+                        <X className="mr-1 h-4 w-4" />
+                        Remove
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                className="hidden"
+                onChange={handleAvatarUpload}
+              />
+            </div>
+
             <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <Label htmlFor="fullName" className="flex items-center gap-2">

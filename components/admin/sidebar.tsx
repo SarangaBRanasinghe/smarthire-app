@@ -3,9 +3,14 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
-import { ShieldCheck, Building2 } from 'lucide-react'
+import { ShieldCheck, Building2, LayoutDashboard } from 'lucide-react'
 
 const navItems = [
+  {
+    title: 'Dashboard',
+    href: '/admin',
+    icon: <LayoutDashboard className="h-5 w-5" />,
+  },
   {
     title: 'Company Verification',
     href: '/admin/companies',

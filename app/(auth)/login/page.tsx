@@ -133,26 +133,75 @@ function LoginForm() {
       // Get user role and redirect accordingly
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
-        const { data: profile } = await supabase
+        const { data: profile, error: profileError } = await supabase
           .from('profiles')
           .select('role')
           .eq('id', user.id)
-          .single() as { data: { role: UserRole } | null }
+          .single() as { data: { role: UserRole } | null; error: { code?: string } | null }
 
+        let resolvedRole: UserRole = 'job_seeker'
         if (profile) {
-          switch (profile.role) {
-            case 'admin':
-              router.push('/admin/login')
-              break
-            case 'recruiter':
-              router.push('/recruiter/overview')
-              break
-            default:
-              router.push('/seeker/overview')
-          }
+          resolvedRole = profile.role
         } else {
-          // No profile exists - redirect to setup or create default
-          router.push('/seeker/overview')
+          const metadataRole = user.user_metadata?.role
+          if (metadataRole === 'admin' || metadataRole === 'recruiter' || metadataRole === 'job_seeker') {
+            resolvedRole = metadataRole
+          }
+
+          if (!profileError || profileError.code === 'PGRST116') {
+            const { error: createProfileError } = await supabase
+              .from('profiles')
+              .insert({
+                id: user.id,
+                email: user.email ?? '',
+                full_name:
+                  user.user_metadata?.full_name ||
+                  user.user_metadata?.name ||
+                  user.email?.split('@')[0] ||
+                  'User',
+                avatar_url: user.user_metadata?.avatar_url ?? null,
+                role: resolvedRole,
+              } as never)
+
+            if (createProfileError) {
+              toast.error('Profile setup failed. Please try again.')
+              return
+            }
+          }
+        }
+
+        if (resolvedRole === 'recruiter') {
+          await supabase
+            .from('recruiter_profiles')
+            .upsert(
+              {
+                id: user.id,
+                company_name: user.user_metadata?.company_name || 'My Company',
+              },
+              { onConflict: 'id' }
+            )
+        } else if (resolvedRole === 'job_seeker') {
+          await supabase
+            .from('seeker_profiles')
+            .upsert(
+              {
+                id: user.id,
+                experience_summary: [],
+                education_summary: [],
+              },
+              { onConflict: 'id' }
+            )
+        }
+
+        switch (resolvedRole) {
+          case 'admin':
+            router.push('/admin/login')
+            break
+          case 'recruiter':
+            router.push('/recruiter/overview')
+            break
+          default:
+            router.push('/seeker/overview')
         }
       }
     } catch {

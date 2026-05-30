@@ -101,7 +101,7 @@ function RegisterForm() {
   const onSubmit = async (data: RegisterFormData) => {
     setIsLoading(true)
     try {
-      const { error } = await supabase.auth.signUp({
+      const { data: signUpData, error } = await supabase.auth.signUp({
         email: data.email,
         password: data.password,
         options: {
@@ -115,6 +115,66 @@ function RegisterForm() {
 
       if (error) {
         toast.error(error.message)
+        return
+      }
+
+      const user = signUpData?.user
+      const hasSession = Boolean(signUpData?.session)
+
+      if (user && hasSession) {
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .upsert(
+            {
+              id: user.id,
+              email: data.email,
+              full_name: data.fullName,
+              role: selectedRole as UserRole,
+              avatar_url: user.user_metadata?.avatar_url ?? null,
+            } as never,
+            { onConflict: 'id' }
+          )
+
+        if (profileError) {
+          toast.error('Account created, but profile setup failed. Please log in again.')
+          return
+        }
+
+        if (selectedRole === 'recruiter') {
+          const { error: recruiterError } = await supabase
+            .from('recruiter_profiles')
+            .upsert(
+              {
+                id: user.id,
+                company_name: data.companyName || 'My Company',
+              } as never,
+              { onConflict: 'id' }
+            )
+
+          if (recruiterError) {
+            toast.error('Account created, but recruiter profile setup failed.')
+            return
+          }
+        } else {
+          const { error: seekerError } = await supabase
+            .from('seeker_profiles')
+            .upsert(
+              {
+                id: user.id,
+                experience_summary: [],
+                education_summary: [],
+              } as never,
+              { onConflict: 'id' }
+            )
+
+          if (seekerError) {
+            toast.error('Account created, but seeker profile setup failed.')
+            return
+          }
+        }
+
+        toast.success('Account created! You can sign in now.')
+        router.push('/login')
         return
       }
 

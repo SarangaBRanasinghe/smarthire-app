@@ -485,7 +485,7 @@ export default function SeekerApplicationsPage() {
 
       {/* ── Application Details Dialog ──────────────────────────────────────── */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-hidden">
           <DialogHeader>
             <DialogTitle>{selectedApplication?.jobTitle}</DialogTitle>
             <DialogDescription>
@@ -495,7 +495,8 @@ export default function SeekerApplicationsPage() {
           </DialogHeader>
 
           {selectedApplication && (
-            <div className="space-y-4 py-2">
+            <div className="py-2">
+              <div className="space-y-4 max-h-[calc(80vh-6rem)] overflow-y-auto pr-2">
               {/* Status */}
               <div className="flex items-center justify-between">
                 <span className="text-sm text-gray-500">Status</span>
@@ -538,7 +539,7 @@ export default function SeekerApplicationsPage() {
               {selectedApplication.coverLetter && (
                 <div>
                   <p className="mb-1 text-sm text-gray-500">Cover Letter</p>
-                  <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-600 line-clamp-4">
+                  <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-600 whitespace-pre-wrap">
                     {selectedApplication.coverLetter}
                   </p>
                 </div>
@@ -604,6 +605,7 @@ export default function SeekerApplicationsPage() {
                   </p>
                 </div>
               )}
+              </div>
             </div>
           )}
         </DialogContent>

@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import Link from 'next/link'
 import {
   Briefcase,
@@ -36,6 +36,7 @@ interface TopCandidate {
   jobId: string
   name: string
   email: string
+  avatarUrl: string
   appliedFor: string
   matchScore: number
 }
@@ -153,11 +154,11 @@ export default function RecruiterOverviewPage() {
           // Seeker names
           const { data: profileRows } = await supabase
             .from('profiles')
-            .select('id, full_name, email')
+            .select('id, full_name, email, avatar_url')
             .in('id', seekerIds)
 
-          const profileMap: Record<string, { full_name: string | null; email: string }> = {}
-          ;(profileRows ?? []).forEach((p: { id: string; full_name: string | null; email: string }) => {
+          const profileMap: Record<string, { full_name: string | null; email: string; avatar_url: string | null }> = {}
+          ;(profileRows ?? []).forEach((p: { id: string; full_name: string | null; email: string; avatar_url: string | null }) => {
             profileMap[p.id] = p
           })
 
@@ -196,6 +197,7 @@ export default function RecruiterOverviewPage() {
             seekerId: app.seeker_id,
             name: profileMap[app.seeker_id]?.full_name || 'Unknown',
             email: profileMap[app.seeker_id]?.email || '',
+            avatarUrl: profileMap[app.seeker_id]?.avatar_url || '',
             appliedFor: jobTitleMap[app.job_id] || 'Unknown Job',
             matchScore: computeMatch(
               seekerSkillsMap[app.seeker_id] ?? [],
@@ -405,6 +407,9 @@ export default function RecruiterOverviewPage() {
                       {/* Rank / Avatar */}
                       <div className="relative shrink-0">
                         <Avatar className="h-10 w-10">
+                          {candidate.avatarUrl && (
+                            <AvatarImage src={candidate.avatarUrl} alt={`${candidate.name} avatar`} />
+                          )}
                           <AvatarFallback className="bg-emerald-100 text-emerald-700 text-sm font-bold">
                             {candidate.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
                           </AvatarFallback>

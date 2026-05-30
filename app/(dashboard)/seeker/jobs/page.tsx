@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
+import { aiService } from '@/lib/api'
 import {
   Search,
   MapPin,
@@ -103,15 +104,94 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(diffDays / 30)} month${Math.floor(diffDays / 30) > 1 ? 's' : ''} ago`
 }
 
+function toText(value: unknown): string {
+  if (!value) return ''
+  if (typeof value === 'string') return value
+  return JSON.stringify(value)
+}
+
+function tokenize(text: string): Set<string> {
+  return new Set(
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((token) => token.length > 2)
+  )
+}
+
+function overlapScore(sourceText: string, targetText: string): number {
+  const sourceTokens = tokenize(sourceText)
+  const targetTokens = tokenize(targetText)
+  if (sourceTokens.size === 0 || targetTokens.size === 0) return 0
+
+  let matched = 0
+  sourceTokens.forEach((token) => {
+    if (targetTokens.has(token)) matched += 1
+  })
+
+  return Math.round((matched / Math.max(targetTokens.size, 1)) * 100)
+}
+
+interface MatchInputs {
+  seekerSkills: string[]
+  jobSkills: string[]
+  seekerBio: string
+  seekerExperience: string
+  seekerEducation: string
+  seekerLocation: string
+  jobText: string
+  jobLocation: string
+  isVerified: boolean
+}
+
 /**
- * Calculate a match score between seeker skills and job required skills.
- * Returns 0-100 (percentage of job skills the seeker has).
+ * Calculate a match score using skills + profile signals.
+ * Returns 0-100, weighted across skills, experience, about, education, location, verification.
  */
-function computeMatchScore(seekerSkills: string[], jobSkills: string[]): number {
-  if (jobSkills.length === 0) return 50 // No required skills = neutral match
-  const seekerLower = seekerSkills.map((s) => s.toLowerCase())
-  const matched = jobSkills.filter((js) => seekerLower.includes(js.toLowerCase()))
-  return Math.round((matched.length / jobSkills.length) * 100)
+function computeMatchScore(inputs: MatchInputs): number {
+  const {
+    seekerSkills,
+    jobSkills,
+    seekerBio,
+    seekerExperience,
+    seekerEducation,
+    seekerLocation,
+    jobText,
+    jobLocation,
+    isVerified,
+  } = inputs
+
+  const skillsScore = jobSkills.length === 0
+    ? 50
+    : Math.round(
+      (jobSkills.filter((js) =>
+        seekerSkills.map((s) => s.toLowerCase()).includes(js.toLowerCase())
+      ).length / jobSkills.length) * 100
+    )
+
+  const experienceScore = overlapScore(seekerExperience, jobText)
+  const aboutScore = overlapScore(seekerBio, jobText)
+  const educationScore = overlapScore(seekerEducation, jobText)
+
+  const locationScore = seekerLocation && jobLocation
+    ? (jobLocation.toLowerCase().includes(seekerLocation.toLowerCase()) ||
+        seekerLocation.toLowerCase().includes(jobLocation.toLowerCase())
+        ? 100
+        : 0)
+    : 0
+
+  const verifiedScore = isVerified ? 100 : 0
+
+  const weighted =
+    (skillsScore * 0.55) +
+    (experienceScore * 0.2) +
+    (aboutScore * 0.15) +
+    (educationScore * 0.05) +
+    (locationScore * 0.03) +
+    (verifiedScore * 0.02)
+
+  return Math.round(weighted)
 }
 
 // ─── Main Component ────────────────────────────────────────────────────────────
@@ -135,11 +215,37 @@ export default function SeekerJobsPage() {
   const [isApplyDialogOpen, setIsApplyDialogOpen] = useState(false)
   const [coverLetter, setCoverLetter] = useState('')
   const [isApplying, setIsApplying] = useState(false)
+  const [isAiRanking, setIsAiRanking] = useState(false)
+  const [aiQuotaBlockedUntil, setAiQuotaBlockedUntil] = useState<number | null>(null)
+  const [aiQuotaExceeded, setAiQuotaExceeded] = useState(false)
+  const [aiDailyQuotaExceeded, setAiDailyQuotaExceeded] = useState(false)
 
   // Helper to open the detail dialog for a job
   const openDetail = (job: JobWithScore) => {
     setSelectedJob(job)
     setIsDetailDialogOpen(true)
+  }
+
+  const handleRetryAiRanking = async () => {
+    const now = Date.now()
+    if (aiDailyQuotaExceeded) {
+      toast.error('Daily Gemini free-tier quota reached. Try again tomorrow.')
+      return
+    }
+    if (aiQuotaBlockedUntil && now < aiQuotaBlockedUntil) {
+      const seconds = Math.ceil((aiQuotaBlockedUntil - now) / 1000)
+      toast.error(`AI quota cooldown. Try again in ${seconds}s.`)
+      return
+    }
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.removeItem('aiMatchQuotaExceeded')
+      window.sessionStorage.removeItem('aiMatchRetryAfter')
+      window.sessionStorage.removeItem('aiMatchDailyQuotaExceeded')
+    }
+    setAiQuotaExceeded(false)
+    setAiQuotaBlockedUntil(null)
+    setAiDailyQuotaExceeded(false)
+    await loadData()
   }
 
   // ── Load data ────────────────────────────────────────────────────────────────
@@ -162,6 +268,23 @@ export default function SeekerJobsPage() {
         .map((row: { skills: { name: string } | null }) => row.skills?.name)
         .filter(Boolean) as string[]
       setSeekerSkills(mySkills)
+
+      // 2.1 Fetch seeker profile signals (bio/experience/education/location)
+      const { data: seekerProfile } = await supabase
+        .from('seeker_profiles')
+        .select('bio, experience_summary, education_summary, location')
+        .eq('id', user.id)
+        .single<{
+          bio: string | null
+          experience_summary: string | object | null
+          education_summary: string | object | null
+          location: string | null
+        }>()
+
+      const seekerBio = toText(seekerProfile?.bio)
+      const seekerExperience = toText(seekerProfile?.experience_summary)
+      const seekerEducation = toText(seekerProfile?.education_summary)
+      const seekerLocation = toText(seekerProfile?.location)
 
       // 3. Fetch all active jobs with their recruiter info and required skills
       const { data: jobRows, error: jobError } = await supabase
@@ -212,6 +335,9 @@ export default function SeekerJobsPage() {
         const companyWebsite = recruiter?.company_website ?? null
         const isVerified = recruiter?.verification_status ?? false
 
+        const jobText = `${job.title ?? ''} ${job.description ?? ''}`
+        const jobLocation = job.location ?? ''
+
         return {
           id: job.id,
           title: job.title,
@@ -227,7 +353,17 @@ export default function SeekerJobsPage() {
           skills: jobSkillNames,
           description: job.description ?? '',
           created_at: job.created_at,
-          matchScore: computeMatchScore(mySkills, jobSkillNames),
+          matchScore: computeMatchScore({
+            seekerSkills: mySkills,
+            jobSkills: jobSkillNames,
+            seekerBio,
+            seekerExperience,
+            seekerEducation,
+            seekerLocation,
+            jobText,
+            jobLocation,
+            isVerified,
+          }),
           alreadyApplied: appliedIds.has(job.id),
         }
       })
@@ -236,6 +372,93 @@ export default function SeekerJobsPage() {
       scored.sort((a, b) => b.matchScore - a.matchScore)
 
       setJobs(scored)
+
+      // 7. AI semantic ranking (batch)
+      if (scored.length > 0) {
+        const now = Date.now()
+        const quotaExceeded = typeof window !== 'undefined'
+          && window.sessionStorage.getItem('aiMatchQuotaExceeded') === '1'
+        const dailyQuotaExceeded = typeof window !== 'undefined'
+          && window.sessionStorage.getItem('aiMatchDailyQuotaExceeded') === '1'
+        const retryAfter = typeof window !== 'undefined'
+          ? Number(window.sessionStorage.getItem('aiMatchRetryAfter') || '0')
+          : 0
+
+        if (dailyQuotaExceeded) {
+          setAiQuotaExceeded(true)
+          setAiDailyQuotaExceeded(true)
+          return
+        }
+
+        if (quotaExceeded) {
+          setAiQuotaExceeded(true)
+          setAiQuotaBlockedUntil(retryAfter || null)
+        }
+
+        if (quotaExceeded && retryAfter && now < retryAfter) {
+          return
+        }
+
+        setIsAiRanking(true)
+        try {
+          const aiScores = await aiService.getJobMatchScores({
+            seekerProfile: {
+              bio: seekerBio,
+              experience: seekerExperience,
+              education: seekerEducation,
+              skills: mySkills,
+              location: seekerLocation,
+            },
+            jobs: scored.map((job) => ({
+              id: job.id,
+              title: job.title,
+              description: job.description,
+              skills: job.skills,
+              location: job.location,
+              company: job.company,
+            })),
+          })
+
+          const scoreMap = new Map(aiScores.map((item) => [item.jobId, item.score]))
+          const aiRanked = scored.map((job) => ({
+            ...job,
+            matchScore: scoreMap.get(job.id) ?? job.matchScore,
+          }))
+
+          aiRanked.sort((a, b) => b.matchScore - a.matchScore)
+          setJobs(aiRanked)
+        } catch (err) {
+          const message = err instanceof Error ? err.message : ''
+          const isQuota = message.toLowerCase().includes('quota') || message.includes('429')
+          if (isQuota) {
+            const retryDelayMatch = message.match(/retry(?:\s*in|Delay")\s*([0-9.]+)s/i)
+            const retryDelaySeconds = retryDelayMatch ? Math.ceil(Number(retryDelayMatch[1])) : 10
+            const isDaily = /per\s*day|GenerateRequestsPerDay|daily/i.test(message)
+            const retryAt = isDaily
+              ? new Date(new Date().setHours(23, 59, 59, 999)).getTime()
+              : Date.now() + (retryDelaySeconds * 1000)
+            if (typeof window !== 'undefined') {
+              window.sessionStorage.setItem('aiMatchQuotaExceeded', '1')
+              window.sessionStorage.setItem('aiMatchRetryAfter', String(retryAt))
+              if (isDaily) {
+                window.sessionStorage.setItem('aiMatchDailyQuotaExceeded', '1')
+              }
+            }
+            setAiQuotaExceeded(true)
+            setAiQuotaBlockedUntil(retryAt)
+            setAiDailyQuotaExceeded(isDaily)
+            toast.error(isDaily
+              ? 'Daily Gemini free-tier quota reached. Try again tomorrow.'
+              : 'AI ranking paused due to Gemini free-tier quota. Try again later.'
+            )
+          } else {
+            console.error('AI ranking error:', err)
+            toast.error('AI ranking failed. Showing standard matches.')
+          }
+        } finally {
+          setIsAiRanking(false)
+        }
+      }
     } catch (err) {
       console.error('Load error:', err)
       toast.error('Failed to load job listings')
@@ -469,7 +692,19 @@ export default function SeekerJobsPage() {
             <p className="text-sm text-gray-500">
               Showing <span className="font-medium text-gray-700">{filteredJobs.length}</span> jobs
               {seekerSkills.length > 0 && ' · Sorted by best match'}
+              {isAiRanking && ' · AI ranking in progress...'}
             </p>
+            {aiQuotaExceeded && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-emerald-700 border-emerald-300 hover:bg-emerald-50"
+                onClick={handleRetryAiRanking}
+                disabled={Boolean(aiDailyQuotaExceeded || (aiQuotaBlockedUntil && Date.now() < aiQuotaBlockedUntil))}
+              >
+                Retry AI ranking
+              </Button>
+            )}
             {seekerSkills.length === 0 && (
               <a
                 href="/seeker/profile"
