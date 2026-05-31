@@ -51,16 +51,22 @@ function LoginForm() {
   const supabase = createClient()
   const [isLoading, setIsLoading] = useState(false)
   const [isGoogleLoading, setIsGoogleLoading] = useState(false)
+  const [isVerified, setIsVerified] = useState(false)
 
-  // Check for OAuth error
+  // Check for URL params (errors or email verification)
   useEffect(() => {
     const authError = searchParams.get('error')
     const errorCode = searchParams.get('error_code')
     const errorDescription = searchParams.get('error_description')
-    
+    const verified = searchParams.get('verified')
+
+    if (verified === 'true') {
+      setIsVerified(true)
+    }
+
     if (authError) {
-      const message = errorDescription 
-        ? decodeURIComponent(errorDescription) 
+      const message = errorDescription
+        ? decodeURIComponent(errorDescription)
         : `Authentication failed (${errorCode || 'unknown'})`
       toast.error(message)
     }
@@ -107,7 +113,18 @@ function LoginForm() {
       })
 
       if (error) {
-        toast.error(error.message)
+        // Give a clearer message for common Supabase auth errors
+        if (
+          error.message.toLowerCase().includes('email not confirmed') ||
+          error.message.toLowerCase().includes('invalid login credentials')
+        ) {
+          toast.error(
+            'Login failed. If you just registered, please confirm your email first by clicking the link we sent you.',
+            { duration: 8000 }
+          )
+        } else {
+          toast.error(error.message)
+        }
         return
       }
 
@@ -116,26 +133,75 @@ function LoginForm() {
       // Get user role and redirect accordingly
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
-        const { data: profile } = await supabase
+        const { data: profile, error: profileError } = await supabase
           .from('profiles')
           .select('role')
           .eq('id', user.id)
-          .single() as { data: { role: UserRole } | null }
+          .single() as { data: { role: UserRole } | null; error: { code?: string } | null }
 
+        let resolvedRole: UserRole = 'job_seeker'
         if (profile) {
-          switch (profile.role) {
-            case 'admin':
-              router.push('/admin/users')
-              break
-            case 'recruiter':
-              router.push('/recruiter/overview')
-              break
-            default:
-              router.push('/seeker/overview')
-          }
+          resolvedRole = profile.role
         } else {
-          // No profile exists - redirect to setup or create default
-          router.push('/seeker/overview')
+          const metadataRole = user.user_metadata?.role
+          if (metadataRole === 'admin' || metadataRole === 'recruiter' || metadataRole === 'job_seeker') {
+            resolvedRole = metadataRole
+          }
+
+          if (!profileError || profileError.code === 'PGRST116') {
+            const { error: createProfileError } = await supabase
+              .from('profiles')
+              .insert({
+                id: user.id,
+                email: user.email ?? '',
+                full_name:
+                  user.user_metadata?.full_name ||
+                  user.user_metadata?.name ||
+                  user.email?.split('@')[0] ||
+                  'User',
+                avatar_url: user.user_metadata?.avatar_url ?? null,
+                role: resolvedRole,
+              } as never)
+
+            if (createProfileError) {
+              toast.error('Profile setup failed. Please try again.')
+              return
+            }
+          }
+        }
+
+        if (resolvedRole === 'recruiter') {
+          await supabase
+            .from('recruiter_profiles')
+            .upsert(
+              {
+                id: user.id,
+                company_name: user.user_metadata?.company_name || 'My Company',
+              } as never,
+              { onConflict: 'id' }
+            )
+        } else if (resolvedRole === 'job_seeker') {
+          await supabase
+            .from('seeker_profiles')
+            .upsert(
+              {
+                id: user.id,
+                experience_summary: [],
+                education_summary: [],
+              } as never,
+              { onConflict: 'id' }
+            )
+        }
+
+        switch (resolvedRole) {
+          case 'admin':
+            router.push('/admin/login')
+            break
+          case 'recruiter':
+            router.push('/recruiter/overview')
+            break
+          default:
+            router.push('/seeker/overview')
         }
       }
     } catch {
@@ -147,6 +213,17 @@ function LoginForm() {
 
   return (
     <>
+      {/* Email Verified Banner */}
+      {isVerified && (
+        <div className="mb-6 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 flex items-start gap-3">
+          <span className="text-emerald-600 text-lg">✅</span>
+          <div>
+            <p className="text-sm font-semibold text-emerald-800">Email verified successfully!</p>
+            <p className="text-xs text-emerald-700 mt-0.5">You can now sign in with your email and password below.</p>
+          </div>
+        </div>
+      )}
+
       <div>
         <h2 className="text-2xl font-bold text-gray-900">Welcome back</h2>
         <p className="mt-2 text-sm text-gray-600">

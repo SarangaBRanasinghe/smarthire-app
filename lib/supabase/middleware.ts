@@ -36,8 +36,8 @@ export async function updateSession(request: NextRequest) {
   const pathname = request.nextUrl.pathname
 
   // Public routes that don't require authentication
-  const publicRoutes = ['/', '/login', '/register', '/auth/callback']
-  const isPublicRoute = publicRoutes.some(route => pathname === route || pathname.startsWith('/api/public') || pathname.startsWith('/auth/'))
+  const publicRoutes = ['/', '/login', '/register', '/auth/callback', '/auth/verify-email']
+  const isPublicRoute = publicRoutes.some(route => pathname === route || pathname.startsWith('/api/public') || pathname.startsWith('/api/parse-cv') || pathname.startsWith('/auth/'))
 
   // If user is not logged in and trying to access protected routes
   if (!user && !isPublicRoute) {
@@ -60,7 +60,7 @@ export async function updateSession(request: NextRequest) {
         const url = request.nextUrl.clone()
         switch (profile.role) {
           case 'admin':
-            url.pathname = '/admin/users'
+            url.pathname = '/admin/login'
             break
           case 'recruiter':
             url.pathname = '/recruiter/overview'

@@ -101,7 +101,7 @@ function RegisterForm() {
   const onSubmit = async (data: RegisterFormData) => {
     setIsLoading(true)
     try {
-      const { error } = await supabase.auth.signUp({
+      const { data: signUpData, error } = await supabase.auth.signUp({
         email: data.email,
         password: data.password,
         options: {
@@ -118,14 +118,71 @@ function RegisterForm() {
         return
       }
 
-      toast.success('Account created! Please check your email to verify your account.')
+      const user = signUpData?.user
+      const hasSession = Boolean(signUpData?.session)
 
-      // Redirect to appropriate dashboard
-      if (selectedRole === 'recruiter') {
-        router.push('/recruiter/overview')
-      } else {
-        router.push('/seeker/overview')
+      if (user && hasSession) {
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .upsert(
+            {
+              id: user.id,
+              email: data.email,
+              full_name: data.fullName,
+              role: selectedRole as UserRole,
+              avatar_url: user.user_metadata?.avatar_url ?? null,
+            } as never,
+            { onConflict: 'id' }
+          )
+
+        if (profileError) {
+          toast.error('Account created, but profile setup failed. Please log in again.')
+          return
+        }
+
+        if (selectedRole === 'recruiter') {
+          const { error: recruiterError } = await supabase
+            .from('recruiter_profiles')
+            .upsert(
+              {
+                id: user.id,
+                company_name: data.companyName || 'My Company',
+              } as never,
+              { onConflict: 'id' }
+            )
+
+          if (recruiterError) {
+            toast.error('Account created, but recruiter profile setup failed.')
+            return
+          }
+        } else {
+          const { error: seekerError } = await supabase
+            .from('seeker_profiles')
+            .upsert(
+              {
+                id: user.id,
+                experience_summary: [],
+                education_summary: [],
+              } as never,
+              { onConflict: 'id' }
+            )
+
+          if (seekerError) {
+            toast.error('Account created, but seeker profile setup failed.')
+            return
+          }
+        }
+
+        toast.success('Account created! You can sign in now.')
+        router.push('/login')
+        return
       }
+
+      toast.success('Account created! Please check your inbox for a verification email.')
+
+      // Email confirmation is required — redirect to the "check your email" page
+      router.push(`/auth/verify-email?email=${encodeURIComponent(data.email)}&role=${selectedRole}`)
+
     } catch {
       toast.error('An unexpected error occurred')
     } finally {
