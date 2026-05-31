@@ -177,7 +177,7 @@ function LoginForm() {
               {
                 id: user.id,
                 company_name: user.user_metadata?.company_name || 'My Company',
-              },
+              } as never,
               { onConflict: 'id' }
             )
         } else if (resolvedRole === 'job_seeker') {
@@ -188,7 +188,7 @@ function LoginForm() {
                 id: user.id,
                 experience_summary: [],
                 education_summary: [],
-              },
+              } as never,
               { onConflict: 'id' }
             )
         }
